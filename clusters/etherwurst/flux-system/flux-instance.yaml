@@ -28,10 +28,9 @@ spec:
     domain: "cluster.local"
   sync:
     kind: GitRepository
-    url: "https://github.com/YOUR_ORG/etherwurst.git"
+    url: "https://github.com/abossard/etherwurst.git"
     ref: "refs/heads/main"
     path: "clusters/etherwurst"
-    pullSecret: "flux-system"
   kustomize:
     patches:
       - target:

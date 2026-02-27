@@ -92,6 +92,38 @@ public class ScamAnalyzerTests
         });
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_HighConcentrationAndNewWallet_EmitsPortfolioIndicators()
+    {
+        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics());
+        var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
+
+        var events = await analyzer.AnalyzeAsync(request).ToListAsync();
+        var completed = events.First(e => e.Stage == AnalysisStage.Completed);
+        Assert.NotNull(completed.Result);
+
+        var indicators = completed.Result!.Indicators;
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.CounterpartyConcentration);
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.WalletAgeAnomaly);
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.FailedTransactionSpike);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_VerifiableSignals_EmitProxyAndApprovalDrainIndicators()
+    {
+        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics());
+        var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
+
+        var events = await analyzer.AnalyzeAsync(request).ToListAsync();
+        var completed = events.First(e => e.Stage == AnalysisStage.Completed);
+        Assert.NotNull(completed.Result);
+
+        var indicators = completed.Result!.Indicators;
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.ProxyUpgradeabilityRisk);
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.ApprovalDrainPattern);
+        Assert.Contains(indicators, i => i.Type == ScamIndicatorType.EventLogAnomaly);
+    }
+
     // Stub analytics that always returns clean transactions
     private sealed class StubBlockchainAnalytics : IBlockchainAnalyticsPort
     {
@@ -139,6 +171,162 @@ public class ScamAnalyzerTests
         {
             await Task.Yield();
             return null;
+        }
+
+        public async Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            return "0x";
+        }
+
+        public async Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            return "0x" + new string('0', 64);
+        }
+
+        public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
+            TransactionHash hash,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            return new TransactionReceiptInfo(hash.Value, "0x1", []);
+        }
+    }
+
+    private sealed class HighRiskStubBlockchainAnalytics : IBlockchainAnalyticsPort
+    {
+        private const string RootWallet = "0x742d35cc6634c0532925a3b844bc454e4438f44e";
+
+        public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+            WalletAddress address,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            var wallet = address.Value.ToLowerInvariant();
+
+            if (wallet == RootWallet)
+            {
+                var now = DateTimeOffset.UtcNow;
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('a', 64),
+                    From: RootWallet,
+                    To: "0x9999999999999999999999999999999999999999",
+                    ValueEth: 0m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: true,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-25),
+                    Status: "Success",
+                    InputData: "0x095ea7b3" + new string('0', 64));
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('b', 64),
+                    From: RootWallet,
+                    To: "0x9999999999999999999999999999999999999999",
+                    ValueEth: 2.4m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: false,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-20),
+                    Status: "Failed");
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('c', 64),
+                    From: RootWallet,
+                    To: "0x9999999999999999999999999999999999999999",
+                    ValueEth: 1.7m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: false,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-15),
+                    Status: "Failed");
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('d', 64),
+                    From: RootWallet,
+                    To: "0x8888888888888888888888888888888888888888",
+                    ValueEth: 12m,
+                    TokenSymbol: "USDC",
+                    TokenAmount: 500m,
+                    IsContractInteraction: false,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-10),
+                    Status: "Success");
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('e', 64),
+                    From: RootWallet,
+                    To: "0x9999999999999999999999999999999999999999",
+                    ValueEth: 0.8m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: false,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-8),
+                    Status: "Failed");
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('f', 64),
+                    From: RootWallet,
+                    To: "0x7777777777777777777777777777777777777777",
+                    ValueEth: 1.1m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: false,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-5),
+                    Status: "Failed");
+
+                yield return new TransactionInfo(
+                    Hash: "0x" + new string('1', 64),
+                    From: RootWallet,
+                    To: "0x6666666666666666666666666666666666666666",
+                    ValueEth: 0m,
+                    TokenSymbol: "",
+                    TokenAmount: 0m,
+                    IsContractInteraction: true,
+                    ContractName: null,
+                    Timestamp: now.AddMinutes(-2),
+                    Status: "Success",
+                    InputData: "0xb6f9de95" + new string('0', 64));
+            }
+        }
+
+        public Task<TransactionInfo?> GetTransactionAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TransactionInfo?>(null);
+
+        public Task<ContractInfo?> GetContractInfoAsync(string address, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ContractInfo?>(new ContractInfo(address, null, false, true, null));
+
+        public Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("0x" + new string('f', 180));
+
+        public Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("0x0000000000000000000000001111111111111111111111111111111111111111");
+
+        public Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(TransactionHash hash, CancellationToken cancellationToken = default)
+        {
+            var logs = hash.Value.EndsWith("a", StringComparison.OrdinalIgnoreCase)
+                ? new List<TransactionLogInfo>
+                {
+                    new(
+                        Address: "0x9999999999999999999999999999999999999999",
+                        Topics:
+                        [
+                            "0x8c5be1e5ebec7d5bd14f714f3a5a2f8f3ecf6f6c7d8b9d5f9c4a1c6f0f8b7c3",
+                            "0x0",
+                            "0x0"
+                        ],
+                        Data: "0x0")
+                }
+                : [];
+
+            return Task.FromResult<TransactionReceiptInfo?>(
+                new TransactionReceiptInfo(hash.Value, "0x1", logs));
         }
     }
 }

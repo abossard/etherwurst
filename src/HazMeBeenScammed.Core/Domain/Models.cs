@@ -52,7 +52,26 @@ public record TransactionInfo(
     bool IsContractInteraction,
     string? ContractName,
     DateTimeOffset Timestamp,
-    string Status
+    string Status,
+    string? InputData = null
+);
+
+/// <summary>
+/// Lightweight receipt model used by on-chain verification checks.
+/// </summary>
+public record TransactionReceiptInfo(
+    string TransactionHash,
+    string Status,
+    IReadOnlyList<TransactionLogInfo> Logs
+);
+
+/// <summary>
+/// Lightweight transaction log model used by on-chain verification checks.
+/// </summary>
+public record TransactionLogInfo(
+    string Address,
+    IReadOnlyList<string> Topics,
+    string Data
 );
 
 /// <summary>
@@ -61,8 +80,12 @@ public record TransactionInfo(
 public record ScamIndicator(
     ScamIndicatorType Type,
     string Description,
-    ScamSeverity Severity
+    ScamSeverity Severity,
+    IndicatorConfidence Confidence = IndicatorConfidence.Medium,
+    IReadOnlyList<string>? Evidence = null
 );
+
+public enum IndicatorConfidence { Low, Medium, High, Verified }
 
 public enum ScamIndicatorType
 {
@@ -77,7 +100,15 @@ public enum ScamIndicatorType
     UnverifiedContract,
     HighGasFee,
     SandwichAttack,
-    CleanTransaction
+    CleanTransaction,
+    CounterpartyConcentration,
+    WalletAgeAnomaly,
+    FailedTransactionSpike,
+    ProxyUpgradeabilityRisk,
+    ApprovalDrainPattern,
+    EventLogAnomaly,
+    MaliciousBytecodeSimilarity,
+    BurstFanoutPattern
 }
 
 public enum ScamSeverity { Info, Warning, High, Critical }

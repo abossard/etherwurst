@@ -127,5 +127,14 @@ public class WalletGraphServiceTests
 
         public Task<ContractInfo?> GetContractInfoAsync(string address, CancellationToken cancellationToken = default) =>
             Task.FromResult<ContractInfo?>(null);
+
+        public Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("0x");
+
+        public Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("0x" + new string('0', 64));
+
+        public Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TransactionReceiptInfo?>(new TransactionReceiptInfo(hash.Value, "0x1", []));
     }
 }

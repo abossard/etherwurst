@@ -26,6 +26,24 @@ public interface IBlockchainAnalyticsPort
     /// </summary>
     Task<ContractInfo?> GetContractInfoAsync(
         string address, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns contract bytecode at the given address, or null/0x for EOAs.
+    /// </summary>
+    Task<string?> GetBytecodeAsync(
+        string address, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the storage value for the given slot at the given address.
+    /// </summary>
+    Task<string?> GetStorageAtAsync(
+        string address, string slot, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns receipt-level logs for a transaction.
+    /// </summary>
+    Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
+        TransactionHash hash, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

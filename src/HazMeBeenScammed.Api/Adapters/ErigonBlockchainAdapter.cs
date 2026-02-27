@@ -172,6 +172,38 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         );
     }
 
+    public Task<string?> GetBytecodeAsync(
+        string address,
+        CancellationToken cancellationToken = default) =>
+        RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
+
+    public Task<string?> GetStorageAtAsync(
+        string address,
+        string slot,
+        CancellationToken cancellationToken = default) =>
+        RpcCall<string>("eth_getStorageAt", [address, slot, "latest"], cancellationToken);
+
+    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
+        TransactionHash hash,
+        CancellationToken cancellationToken = default)
+    {
+        var receipt = await RpcCall<RpcReceipt>("eth_getTransactionReceipt", [hash.Value], cancellationToken);
+        if (receipt is null)
+        {
+            return null;
+        }
+
+        var logs = receipt.Logs?.Select(l => new TransactionLogInfo(
+            Address: l.Address ?? string.Empty,
+            Topics: (l.Topics ?? []).ToList(),
+            Data: l.Data ?? "0x")).ToList() ?? [];
+
+        return new TransactionReceiptInfo(
+            TransactionHash: hash.Value,
+            Status: receipt.Status ?? "0x0",
+            Logs: logs);
+    }
+
     // ─── JSON-RPC helpers ────────────────────────────────────────────
 
     private async Task<T?> RpcCall<T>(string method, object[] parameters,
@@ -243,7 +275,8 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
             IsContractInteraction: isContract,
             ContractName: null, // Enriched later by ScamAnalyzer via GetContractInfoAsync
             Timestamp: timestamp,
-            Status: status
+            Status: status,
+            InputData: tx.Input
         );
     }
 

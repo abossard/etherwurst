@@ -83,6 +83,77 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         );
     }
 
+    public async Task<string?> GetBytecodeAsync(
+        string address,
+        CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(5, cancellationToken);
+        var random = CreateDeterministicRandom(address + ":bytecode");
+        var isContract = random.Next(10) < 6;
+        if (!isContract)
+        {
+            return "0x";
+        }
+
+        var bytes = GenerateRandomBytes(random, random.Next(150, 360));
+        return "0x" + Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    public async Task<string?> GetStorageAtAsync(
+        string address,
+        string slot,
+        CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(5, cancellationToken);
+        var random = CreateDeterministicRandom(address + ":" + slot);
+
+        // Return EIP-1967-like non-zero slot for some addresses to simulate proxy implementation pointers.
+        if (random.Next(10) < 3)
+        {
+            var impl = DeriveAddress(address, 555).Replace("0x", "", StringComparison.OrdinalIgnoreCase);
+            return "0x" + new string('0', 24) + impl;
+        }
+
+        return "0x" + new string('0', 64);
+    }
+
+    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
+        TransactionHash hash,
+        CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(6, cancellationToken);
+        var random = CreateDeterministicRandom(hash.Value + ":receipt");
+
+        var logs = new List<TransactionLogInfo>();
+        var topicCount = random.Next(0, 3);
+        for (var i = 0; i < topicCount; i++)
+        {
+            var topics = new List<string>();
+            if (random.Next(2) == 0)
+            {
+                // ERC20 Transfer
+                topics.Add("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
+            }
+            else
+            {
+                // ERC20 Approval
+                topics.Add("0x8c5be1e5ebec7d5bd14f714f3a5a2f8f3ecf6f6c7d8b9d5f9c4a1c6f0f8b7c3");
+            }
+            topics.Add("0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant());
+            topics.Add("0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant());
+
+            logs.Add(new TransactionLogInfo(
+                Address: DeriveAddress(hash.Value, i + 1),
+                Topics: topics,
+                Data: "0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant()));
+        }
+
+        return new TransactionReceiptInfo(
+            TransactionHash: hash.Value,
+            Status: random.Next(10) == 0 ? "0x0" : "0x1",
+            Logs: logs);
+    }
+
     private static IReadOnlyList<TransactionInfo> GenerateDeterministicNeighborhoodTransactions(string wallet)
     {
         var random = CreateDeterministicRandom(wallet);
@@ -115,7 +186,8 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
                 IsContractInteraction: isContract,
                 ContractName: isContract ? SuspiciousNames[random.Next(SuspiciousNames.Length)] : null,
                 Timestamp: timestamp,
-                Status: random.Next(15) == 0 ? "Failed" : "Success"));
+                Status: random.Next(15) == 0 ? "Failed" : "Success",
+                InputData: isContract ? BuildInputData(random) : "0x"));
         }
 
         return transactions
@@ -147,8 +219,24 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
             IsContractInteraction: isContract,
             ContractName: contractName,
             Timestamp: timestamp,
-            Status: random.Next(10) == 0 ? "Failed" : "Success"
+            Status: random.Next(10) == 0 ? "Failed" : "Success",
+            InputData: isContract ? BuildInputData(random) : "0x"
         );
+    }
+
+    private static string BuildInputData(Random random)
+    {
+        var selectors = new[]
+        {
+            "0x095ea7b3", // approve(address,uint256)
+            "0xa9059cbb", // transfer(address,uint256)
+            "0x23b872dd", // transferFrom(address,address,uint256)
+            "0x7ff36ab5", // swapExactETHForTokens
+            "0xb6f9de95"  // random unknown selector
+        };
+        var selector = selectors[random.Next(selectors.Length)];
+        var payload = Convert.ToHexString(GenerateRandomBytes(random, 64)).ToLowerInvariant();
+        return selector + payload;
     }
 
     private static Random CreateDeterministicRandom(string seedText)
