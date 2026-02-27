@@ -192,6 +192,7 @@
 @code {
     private string InputValue { get; set; } = "";
     private bool IsAnalyzing { get; set; }
+    private bool DeepAnalysisInProgress { get; set; }
 
     private List<AnalysisProgressEvent> Events { get; } = [];
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
@@ -232,6 +233,7 @@
         CounterpartyRisks.Clear();
         CombinedRiskScore = null;
         DeepAnalysisMessage = null;
+        DeepAnalysisInProgress = false;
         IsAnalyzing = true;
         StateHasChanged();
 
@@ -270,9 +272,13 @@
                             CounterpartyRisks[evt.CounterpartyRisk.Address] = evt.CounterpartyRisk;
                             CombinedRiskScore = evt.CounterpartyRisk.CombinedRiskScore;
                             DeepAnalysisMessage = evt.Message;
+                            DeepAnalysisInProgress = true;
                         }
                         if (evt.Stage == AnalysisStage.DeepAnalysisComplete)
+                        {
                             DeepAnalysisMessage = evt.Message;
+                            DeepAnalysisInProgress = false;
+                        }
                         if (evt.Stage == AnalysisStage.Failed)
                             ErrorMessage = evt.Message;
                         StateHasChanged();
@@ -348,7 +354,7 @@
             builder.AddContent(3, risk.RiskScore.ToString());
             builder.CloseElement();
         }
-        else if (DeepAnalysisMessage is not null)
+        else if (DeepAnalysisInProgress)
         {
             builder.OpenElement(0, "span");
             builder.AddAttribute(1, "class", "spinner-border spinner-border-sm text-muted");

@@ -1,5 +1,6 @@
 using HazMeBeenScammed.Core.Domain;
 using HazMeBeenScammed.Core.Ports;
+using Microsoft.Extensions.Logging;
 
 namespace HazMeBeenScammed.Core.Services;
 
@@ -7,7 +8,7 @@ namespace HazMeBeenScammed.Core.Services;
 /// Core domain service that orchestrates scam analysis using the blockchain analytics port.
 /// Follows the hexagonal architecture: pure domain logic, no framework dependencies.
 /// </summary>
-public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnalysisPort
+public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<ScamAnalyzer> logger) : IScamAnalysisPort
 {
     private const string TransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
     private const string ApprovalTopic = "0x8c5be1e5ebec7d5bd14f714f3a5a2f8f3ecf6f6c7d8b9d5f9c4a1c6f0f8b7c3";
@@ -169,9 +170,13 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnal
                             new CounterpartyRiskEvent(id, addr, cpScore, cpVerdict, cpTxs.Count, combinedScore));
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch
+                    catch (Exception ex)
                     {
                         counterpartyScores[addr] = 0;
+                        cpEvent = new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
+                            $"Analyzed {analyzed}/{counterparties.Count}: {addr[..8]}… (error: {ex.Message})",
+                            100, null,
+                            new CounterpartyRiskEvent(id, addr, 0, ScamVerdict.Clean, 0, ComputeCombinedScore(score, counterpartyScores)));
                     }
 
                     if (cpEvent is not null)
@@ -331,9 +336,9 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnal
                         [contract, $"bytecodeLength={bytecode.Length}"]));
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip individual contract lookup failures to keep analysis stream resilient.
+                logger.LogWarning(ex, "Contract lookup failed for {Contract}, skipping", contract);
             }
         }
 
@@ -394,9 +399,9 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnal
                         [tx.Hash, tx.InputData[..10]]));
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Keep analysis resilient; skip individual receipt failures.
+                logger.LogWarning(ex, "Receipt analysis failed for tx {TxHash}, skipping", tx.Hash);
             }
         }
 

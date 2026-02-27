@@ -10,7 +10,7 @@ public class ScamAnalyzerTests
 
     public ScamAnalyzerTests()
     {
-        _analyzer = new ScamAnalyzer(new StubBlockchainAnalytics());
+        _analyzer = new ScamAnalyzer(new StubBlockchainAnalytics(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ScamAnalyzer>.Instance);
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class ScamAnalyzerTests
     [Fact]
     public async Task AnalyzeAsync_HighConcentrationAndNewWallet_EmitsPortfolioIndicators()
     {
-        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics());
+        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ScamAnalyzer>.Instance);
         var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
 
         var events = await analyzer.AnalyzeAsync(request).ToListAsync();
@@ -111,7 +111,7 @@ public class ScamAnalyzerTests
     [Fact]
     public async Task AnalyzeAsync_VerifiableSignals_EmitProxyAndApprovalDrainIndicators()
     {
-        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics());
+        var analyzer = new ScamAnalyzer(new HighRiskStubBlockchainAnalytics(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ScamAnalyzer>.Instance);
         var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
 
         var events = await analyzer.AnalyzeAsync(request).ToListAsync();

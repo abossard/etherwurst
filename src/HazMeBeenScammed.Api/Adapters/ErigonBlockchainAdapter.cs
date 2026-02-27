@@ -280,7 +280,7 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         );
     }
 
-    private static string? TruncateAbi(string abi)
+    private string? TruncateAbi(string abi)
     {
         // Return first function signature for display
         try
@@ -296,7 +296,10 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
                 }
             }
         }
-        catch { /* not valid JSON array */ }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse ABI JSON for truncation");
+        }
         return null;
     }
 
