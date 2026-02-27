@@ -35,3 +35,16 @@ spec:
       url: "https://mainnet-checkpoint-sync.stakely.io"
     p2pNodePort:
       enabled: false
+    tolerations:
+      - key: ethereum-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: workload-type
+                  operator: In
+                  values: ["ethereum"]

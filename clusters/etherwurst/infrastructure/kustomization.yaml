@@ -4,3 +4,4 @@ resources:
   - namespaces.yaml
   - storage-classes.yaml
   - helm-repositories.yaml
+  - ethereum-nodepool.yaml
