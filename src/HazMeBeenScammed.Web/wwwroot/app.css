@@ -490,6 +490,58 @@ h1:focus {
     border-radius: 5px;
 }
 
+.lab-matrix-wrap {
+    overflow-x: auto;
+}
+
+.lab-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+.lab-matrix th,
+.lab-matrix td {
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    padding: 0.55rem 0.6rem;
+    vertical-align: top;
+}
+
+.lab-matrix th {
+    background: #f1f5f9;
+    color: #0f172a;
+    text-align: left;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.lab-tag {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.14rem 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.tag-heuristic {
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.tag-verified {
+    background: #ecfeff;
+    color: #155e75;
+}
+
+.lab-footnote {
+    margin-top: 0.6rem;
+    color: #475569;
+    font-size: 0.86rem;
+}
+
 .verdict-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

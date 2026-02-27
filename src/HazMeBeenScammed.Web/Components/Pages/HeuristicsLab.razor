@@ -6,27 +6,25 @@
 <div class="lab-hero">
     <h1>Scam Detection Lab</h1>
     <p>
-        Welcome to the tiny science lab where we inspect suspicious Ethereum behavior 🔬🧪
-        and still explain it like you are five 🧠🍭.
+        A scientific field guide to how this app detects sketchy Ethereum behavior,
+        explained like you are five where it helps 🧪🧠.
     </p>
 </div>
 
 <div class="lab-layout">
     <section class="lab-card">
-        <h2>Detection Philosophy</h2>
-        <p>
-            We combine two worlds:
-        </p>
+        <h2>Method</h2>
         <ul>
-            <li><strong>Heuristics</strong>: fast pattern checks (good first alarm) ⚡</li>
-            <li><strong>Verifiable on-chain signals</strong>: checks we can prove from chain data 🧾</li>
+            <li><strong>Heuristics</strong> = quick pattern alarms ⚡</li>
+            <li><strong>Verifiable on-chain checks</strong> = provable evidence from chain data 🧾</li>
         </ul>
         <p>
+            Score model:
             <code>finalScore = heuristicScore * 0.45 + verifiableScore * 0.55</code>
         </p>
         <p>
-            ELI5: if your friend says "that looks weird" and the security camera agrees,
-            we trust the camera a bit more.
+            ELI5: your friend says "hmm weird" and the camera confirms it.
+            We trust the camera a bit more 📷
         </p>
     </section>
 
@@ -53,61 +51,71 @@
     </section>
 
     <section class="lab-card">
-        <h2>Heuristics (Fast Checks)</h2>
-        <div class="signal-grid">
-            <article class="signal">
-                <h3>Counterparty Concentration</h3>
-                <p><strong>Science:</strong> Top counterparties dominating > 60% suggests funnel behavior.</p>
-                <p><strong>ELI5:</strong> If all your candy keeps going to one kid, that is suspicious 🍬</p>
-            </article>
-            <article class="signal">
-                <h3>Wallet Age Anomaly</h3>
-                <p><strong>Science:</strong> New wallet (&lt; 7 days) moving high value can be risky.</p>
-                <p><strong>ELI5:</strong> Brand new account suddenly acting rich can be fake money theater 🎭</p>
-            </article>
-            <article class="signal">
-                <h3>Failed Transaction Spike</h3>
-                <p><strong>Science:</strong> High fail ratio (&gt; 40%) may indicate probing or abuse attempts.</p>
-                <p><strong>ELI5:</strong> If someone keeps trying keys that do not fit, maybe they are breaking in 🔑</p>
-            </article>
-            <article class="signal">
-                <h3>Rapid Token Dump</h3>
-                <p><strong>Science:</strong> Many token transfers in a short interval indicates burst liquidation.</p>
-                <p><strong>ELI5:</strong> Throwing all toys out the window at once is not normal 🧸</p>
-            </article>
+        <h2>Signal Matrix (Science + ELI5)</h2>
+        <div class="lab-matrix-wrap">
+            <table class="lab-matrix">
+                <thead>
+                    <tr>
+                        <th>Signal</th>
+                        <th>Scientific Test</th>
+                        <th>ELI5</th>
+                        <th>Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Counterparty concentration</td>
+                        <td>Top counterparties > 60% of interactions.</td>
+                        <td>All candy keeps going to one kid 🍬</td>
+                        <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
+                    </tr>
+                    <tr>
+                        <td>Wallet age anomaly</td>
+                        <td>Wallet younger than 7 days with high-value transfers.</td>
+                        <td>Brand-new account acting rich on day one 🎭</td>
+                        <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
+                    </tr>
+                    <tr>
+                        <td>Failed transaction spike</td>
+                        <td>Failure ratio above 40% over recent activity.</td>
+                        <td>Someone keeps trying wrong keys 🔑</td>
+                        <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
+                    </tr>
+                    <tr>
+                        <td>Proxy upgradeability risk</td>
+                        <td>Read EIP-1967 implementation slot and verify implementation code.</td>
+                        <td>Check if the puppet has a hidden puppeteer 🎎</td>
+                        <td><span class="lab-tag tag-verified">Verifiable</span></td>
+                    </tr>
+                    <tr>
+                        <td>Approval -> drain correlation</td>
+                        <td>Approval event followed by rapid outflow in a short time window.</td>
+                        <td>You gave a key, toys disappeared fast 🗝️➡️🕳️</td>
+                        <td><span class="lab-tag tag-verified">Verifiable</span></td>
+                    </tr>
+                    <tr>
+                        <td>Event log anomaly</td>
+                        <td>Successful call but missing expected approval/transfer-style logs.</td>
+                        <td>Receipt says paid, scanner never beeped 🧾</td>
+                        <td><span class="lab-tag tag-verified">Verifiable</span></td>
+                    </tr>
+                    <tr>
+                        <td>Bytecode similarity risk</td>
+                        <td>Code shape and size resemble known drainer templates.</td>
+                        <td>Same costume, same villain moves 🦹</td>
+                        <td><span class="lab-tag tag-verified">Verifiable</span></td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
+        <p class="lab-footnote">
+            Example RPC proof primitives: <code>eth_getCode</code>, <code>eth_getStorageAt</code>, <code>eth_getTransactionReceipt</code>
+        </p>
     </section>
 
     <section class="lab-card">
-        <h2>Verifiable On-Chain Checks</h2>
-        <div class="signal-grid">
-            <article class="signal">
-                <h3>Proxy Upgradeability Risk</h3>
-                <p><strong>Algorithm:</strong> read EIP-1967 implementation slot and verify code exists.</p>
-                <p><code>eth_getStorageAt(proxy, 0x3608...bbc)</code></p>
-                <p><strong>ELI5:</strong> We check if the puppet has a hidden puppeteer 🎎</p>
-            </article>
-            <article class="signal">
-                <h3>Approval -> Drain Correlation</h3>
-                <p><strong>Algorithm:</strong> approval event followed by rapid outflow in a short window.</p>
-                <p><strong>ELI5:</strong> You gave someone your key, then your toys vanished 🗝️➡️🕳️</p>
-            </article>
-            <article class="signal">
-                <h3>Event Log Anomaly</h3>
-                <p><strong>Algorithm:</strong> successful call with missing expected transfer/approval logs.</p>
-                <p><strong>ELI5:</strong> The receipt says "paid", but no cashier ever beeped 🧾</p>
-            </article>
-            <article class="signal">
-                <h3>Bytecode Similarity Risk</h3>
-                <p><strong>Algorithm:</strong> contract code shape matches known drainer-like templates.</p>
-                <p><strong>ELI5:</strong> Same costume, same tricks, probably same villain 🦹</p>
-            </article>
-        </div>
-    </section>
-
-    <section class="lab-card">
-        <h2>Confidence System</h2>
-        <p>Every indicator carries confidence and evidence.</p>
+        <h2>Confidence and Evidence</h2>
+        <p>Each indicator stores confidence and chain evidence.</p>
         <ul>
             <li><strong>Low</strong>: weak clue 🤏</li>
             <li><strong>Medium</strong>: useful clue 🧩</li>
@@ -120,7 +128,7 @@
     </section>
 
     <section class="lab-card">
-        <h2>Current Engine Pipeline</h2>
+        <h2>Engine Pipeline</h2>
         <ol>
             <li>Fetch transactions and contract metadata.</li>
             <li>Run fast heuristics.</li>
@@ -129,8 +137,6 @@
             <li>Compute weighted score and verdict.</li>
             <li>Stream progress and deep counterparty analysis.</li>
         </ol>
-        <p>
-            ELI5: We do a quick look, then a detective look, then a microscope look 🔍🕵️‍♂️🔬
-        </p>
+        <p>ELI5: quick look -> detective look -> microscope look 🔍🕵️‍♂️🔬</p>
     </section>
 </div>
