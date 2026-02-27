@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 # Etherwurst Sync Status Monitor
 # Usage: ./sync-status.sh [--watch]
@@ -13,19 +13,21 @@ show_status() {
   echo "║                                                              ║"
   echo "║  📦 Erigon (Execution Layer)                                 ║"
   erigon_status=$(kubectl get pod erigon-0 -n ethereum -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+  erigon_restarts=$(kubectl get pod erigon-0 -n ethereum -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "?")
+  erigon_reason=$(kubectl get pod erigon-0 -n ethereum -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}' 2>/dev/null || echo "")
   if [ "$erigon_status" = "Running" ]; then
-    sync_line=$(kubectl logs erigon-0 -n ethereum --tail=20 2>/dev/null | grep -E "\[1/6 OtterSync\] Downloading|Sync finished|OtterSync.*done" | tail -1)
+    sync_line=$(kubectl logs erigon-0 -n ethereum --tail=20 2>/dev/null | grep -E "Downloading|Sync finished|OtterSync" | tail -1 || true)
     if [ -n "$sync_line" ]; then
-      progress=$(echo "$sync_line" | sed -n 's/.*progress="\([^"]*\)".*/\1/p')
-      [ -z "$progress" ] && progress="unknown"
+      progress=$(echo "$sync_line" | sed -n 's/.*progress="\([^"]*\)".*/\1/p' || true)
+      [ -z "$progress" ] && progress="see logs"
       printf "║     Status: ⏳ Syncing — %s\n" "$progress"
     else
-      stage=$(kubectl logs erigon-0 -n ethereum --tail=5 2>/dev/null | sed -n 's/.*\(\[[0-9]*\/[0-9]* [A-Za-z]*\]\).*/\1/p' | tail -1)
+      stage=$(kubectl logs erigon-0 -n ethereum --tail=5 2>/dev/null | sed -n 's/.*\(\[[0-9]*\/[0-9]* [A-Za-z]*\]\).*/\1/p' | tail -1 || true)
       [ -z "$stage" ] && stage="starting"
-      printf "║     Status: ⏳ %s\n" "$stage"
+      printf "║     Status: ⏳ %s (restarts: %s)\n" "$stage" "$erigon_restarts"
     fi
   else
-    printf "║     Status: ❌ %s\n" "$erigon_status"
+    printf "║     Status: ❌ %s (restarts: %s, last: %s)\n" "$erigon_status" "$erigon_restarts" "$erigon_reason"
   fi
 
   # Lighthouse sync
@@ -35,7 +37,7 @@ show_status() {
   lh_restarts=$(kubectl get pod lighthouse-0 -n ethereum -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "?")
   lh_reason=$(kubectl get pod lighthouse-0 -n ethereum -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}' 2>/dev/null || echo "")
   if [ "$lh_status" = "Running" ]; then
-    lh_line=$(kubectl logs lighthouse-0 -n ethereum --tail=10 2>/dev/null | grep -iE "slot|sync|peer|head" | tail -1)
+    lh_line=$(kubectl logs lighthouse-0 -n ethereum --tail=10 2>/dev/null | grep -iE "slot|sync|peer|head" | tail -1 || true)
     printf "║     Status: ✅ Running (restarts: %s)\n" "$lh_restarts"
     [ -n "$lh_line" ] && printf "║     Latest: %s\n" "$(echo "$lh_line" | cut -c1-60)"
   else
@@ -59,7 +61,7 @@ show_status() {
   echo "║                                                              ║"
   echo "║  📊 Monitoring                                               ║"
   mon_total=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  mon_ready=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+  mon_ready=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | grep -c "Running" || true)
   printf "║     Pods: %s/%s running\n" "$mon_ready" "$mon_total"
 
   # HelmReleases
