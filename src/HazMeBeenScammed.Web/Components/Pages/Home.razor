@@ -125,20 +125,20 @@
                                     @foreach (var tx in FinalResult.Transactions)
                                     {
                                         <tr class="@(tx.Status == "Failed" ? "table-danger" : "")">
-                                            <td><code class="hash-cell">@tx.Hash[..10]…</code></td>
-                                            <td><code class="addr-cell">@tx.From[..8]…</code></td>
+                                            <td><a href="/@tx.Hash" class="addr-link"><code class="hash-cell">@tx.Hash[..10]…</code></a></td>
+                                            <td><a href="/@tx.From" class="addr-link"><code class="addr-cell">@tx.From[..8]…</code></a></td>
                                             <td>
                                                 @if (tx.ContractName is not null)
                                                 {
-                                                    <span class="badge bg-success">@tx.ContractName</span>
+                                                    <a href="/@tx.To" class="addr-link"><span class="badge bg-success">@tx.ContractName</span></a>
                                                 }
                                                 else if (tx.IsContractInteraction)
                                                 {
-                                                    <span class="badge bg-warning text-dark">⚠️ Unverified Contract</span>
+                                                    <a href="/@tx.To" class="addr-link"><span class="badge bg-warning text-dark">⚠️ Unverified Contract</span></a>
                                                 }
                                                 else
                                                 {
-                                                    <code class="addr-cell">@tx.To[..8]…</code>
+                                                    <a href="/@tx.To" class="addr-link"><code class="addr-cell">@tx.To[..8]…</code></a>
                                                 }
                                             </td>
                                             <td>@(tx.ValueEth > 0 ? $"{tx.ValueEth:F4} ETH" : "-")</td>
