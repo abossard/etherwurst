@@ -36,22 +36,31 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     {
         _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
 
-        // Erigon caps ots_searchTransactionsAfter at 25 per page — paginate through all
+        const int PageSize = 20; // Erigon max is 25, stay safely under
+        const int MaxTransactions = 1000;
+
+        // ots_searchTransactionsBefore with block 0 = start from latest, walk backwards
         var pageToken = 0UL;
-        var hasMore = true;
+        var totalYielded = 0;
         var blockTimestamps = new Dictionary<string, DateTimeOffset>();
 
-        while (hasMore)
+        while (totalYielded < MaxTransactions)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var result = await RpcCall<OtsSearchResult>(
-                "ots_searchTransactionsAfter",
-                [address.Value, pageToken, 25],
+                "ots_searchTransactionsBefore",
+                [address.Value, pageToken, PageSize],
                 cancellationToken);
 
             if (result?.Txs == null || result.Txs.Length == 0)
+            {
+                _logger.LogInformation("No more transactions for {Address} (yielded {Count})", address.Value, totalYielded);
                 break;
+            }
+
+            _logger.LogInformation("Page returned {Count} txs for {Address} (firstPage={First}, lastPage={Last})",
+                result.Txs.Length, address.Value, result.FirstPage, result.LastPage);
 
             // Batch-fetch block timestamps for new blocks in this page
             foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null && !blockTimestamps.ContainsKey(b)).Distinct())
@@ -64,6 +73,8 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
             foreach (var tx in result.Txs)
             {
+                if (totalYielded >= MaxTransactions) break;
+
                 var receipt = await RpcCall<RpcReceipt>(
                     "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
 
@@ -71,12 +82,20 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
                     ? ts : DateTimeOffset.UtcNow;
 
                 yield return MapTransaction(tx, receipt, timestamp);
+                totalYielded++;
             }
 
-            hasMore = !result.FirstPage;
-            if (result.Txs.Length > 0)
+            // lastPage = we've reached the oldest transaction
+            if (result.LastPage) break;
+
+            // Next cursor: block number of the last tx in this page
+            if (result.Txs[^1].BlockNumber != null)
                 pageToken = HexToUlong(result.Txs[^1].BlockNumber);
+            else
+                break;
         }
+
+        _logger.LogInformation("Finished fetching {Count} transactions for {Address}", totalYielded, address.Value);
     }
 
     public async Task<TransactionInfo?> GetTransactionAsync(
@@ -173,9 +192,8 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
         if (rpcResponse?.Error != null)
         {
-            _logger.LogWarning("RPC error {Code}: {Message}",
-                rpcResponse.Error.Code, rpcResponse.Error.Message);
-            return default;
+            throw new InvalidOperationException(
+                $"Erigon RPC error {rpcResponse.Error.Code} on {method}: {rpcResponse.Error.Message}");
         }
 
         return rpcResponse != null ? rpcResponse.Result : default;
