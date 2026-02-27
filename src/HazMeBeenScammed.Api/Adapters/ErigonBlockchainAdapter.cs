@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Net.Http.Json;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -235,8 +237,7 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
     private static TransactionInfo MapTransaction(RpcTransaction tx, RpcReceipt? receipt, DateTimeOffset timestamp)
     {
-        var valueWei = HexToBigDecimal(tx.Value ?? "0x0");
-        var valueEth = valueWei / 1_000_000_000_000_000_000m;
+        var valueEth = HexToEth(tx.Value ?? "0x0");
         var isContract = !string.IsNullOrEmpty(tx.Input) && tx.Input != "0x";
 
         var status = receipt?.Status switch
@@ -257,8 +258,7 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
                 if (log.Topics is { Length: >= 3 } &&
                     log.Topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
                 {
-                    var rawAmount = HexToBigDecimal(log.Data ?? "0x0");
-                    tokenAmount = rawAmount / 1_000_000_000_000_000_000m; // assume 18 decimals
+                    tokenAmount = HexToTokenAmount(log.Data ?? "0x0");
                     tokenSymbol = "ERC20";
                     break;
                 }
@@ -306,25 +306,31 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         return Convert.ToUInt64(hex.StartsWith("0x") ? hex[2..] : hex, 16);
     }
 
-    private static decimal HexToBigDecimal(string hex)
+    private static decimal HexToEth(string hex)
     {
-        if (string.IsNullOrEmpty(hex) || hex == "0x" || hex == "0x0") return 0m;
-        var clean = hex.StartsWith("0x") ? hex[2..] : hex;
-        if (clean.Length == 0) return 0m;
+        var wei = HexToBigInteger(hex);
+        // Divide by 10^18 using BigInteger, then convert the manageable result to decimal
+        var (whole, remainder) = BigInteger.DivRem(wei, BigInteger.Pow(10, 18));
+        return (decimal)whole + (decimal)remainder / 1_000_000_000_000_000_000m;
+    }
 
-        // Parse hex string as decimal to handle large values
-        decimal result = 0;
-        foreach (var c in clean)
-        {
-            result = result * 16 + c switch
-            {
-                >= '0' and <= '9' => c - '0',
-                >= 'a' and <= 'f' => c - 'a' + 10,
-                >= 'A' and <= 'F' => c - 'A' + 10,
-                _ => 0
-            };
-        }
-        return result;
+    private static decimal HexToTokenAmount(string hex, int decimals = 18)
+    {
+        var raw = HexToBigInteger(hex);
+        var divisor = BigInteger.Pow(10, decimals);
+        var (whole, remainder) = BigInteger.DivRem(raw, divisor);
+        // Clamp to decimal range for extremely large token supplies
+        try { return (decimal)whole + (decimal)remainder / (decimal)divisor; }
+        catch (OverflowException) { return decimal.MaxValue; }
+    }
+
+    private static BigInteger HexToBigInteger(string hex)
+    {
+        if (string.IsNullOrEmpty(hex) || hex == "0x" || hex == "0x0") return BigInteger.Zero;
+        var clean = hex.StartsWith("0x") ? hex[2..] : hex;
+        if (clean.Length == 0) return BigInteger.Zero;
+        // Prefix with 0 to ensure positive interpretation
+        return BigInteger.Parse("0" + clean, NumberStyles.HexNumber);
     }
 
     // ─── RPC DTOs ────────────────────────────────────────────────────

@@ -33,15 +33,6 @@ app.UseAntiforgery();
 
 app.MapStaticAssets();
 
-// Proxy the ALTCHA challenge endpoint so the browser widget can fetch it
-app.MapGet("/api/altcha/challenge", async (IHttpClientFactory httpClientFactory) =>
-{
-    var client = httpClientFactory.CreateClient("api");
-    var response = await client.GetAsync("/api/altcha/challenge");
-    var json = await response.Content.ReadAsStringAsync();
-    return Results.Content(json, "application/json");
-});
-
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

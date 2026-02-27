@@ -1,11 +1,9 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HazMeBeenScammed.Api.Adapters;
 using HazMeBeenScammed.Core.Domain;
 using HazMeBeenScammed.Core.Ports;
 using HazMeBeenScammed.Core.Services;
-using Ixnas.AltchaNet;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,20 +37,6 @@ else
 builder.Services.AddScoped<IScamAnalysisPort, ScamAnalyzer>();
 builder.Services.AddScoped<IWalletGraphPort, WalletGraphService>();
 
-// ALTCHA proof-of-work captcha (self-hosted, no external API)
-var altchaKey = new byte[64];
-var configuredKey = builder.Configuration["Altcha:Key"];
-if (!string.IsNullOrEmpty(configuredKey))
-    altchaKey = Convert.FromBase64String(configuredKey);
-else
-    RandomNumberGenerator.Fill(altchaKey);
-
-builder.Services.AddSingleton(_ =>
-    Altcha.CreateServiceBuilder()
-          .UseSha256(altchaKey)
-          .UseInMemoryStore()
-          .Build());
-
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
@@ -76,39 +60,13 @@ var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
     Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 };
 
-// GET /api/altcha/challenge — generate a fresh proof-of-work challenge
-app.MapGet("/api/altcha/challenge", (AltchaService altcha) =>
-{
-    var challenge = altcha.Generate();
-    return Results.Ok(challenge);
-})
-.WithName("AltchaChallenge")
-.WithTags("Altcha");
-
 // POST /api/analyze — starts analysis and streams SSE events
 app.MapGet("/api/analyze", async (
     string input,
-    string? altcha,
     IScamAnalysisPort analyzer,
-    AltchaService altchaService,
     HttpContext http,
     CancellationToken cancellationToken) =>
 {
-    // Validate ALTCHA proof-of-work token
-    if (string.IsNullOrEmpty(altcha))
-    {
-        http.Response.StatusCode = 403;
-        await http.Response.WriteAsync("Missing ALTCHA token", cancellationToken);
-        return;
-    }
-    var validation = await altchaService.Validate(altcha);
-    if (!validation.IsValid)
-    {
-        http.Response.StatusCode = 403;
-        await http.Response.WriteAsync("Invalid ALTCHA token", cancellationToken);
-        return;
-    }
-
     http.Response.ContentType = "text/event-stream";
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers.Connection = "keep-alive";

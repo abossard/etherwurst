@@ -26,11 +26,10 @@ spec:
         - ReadWriteOnce
     resources:
       requests:
-        cpu: "1"
-        memory: "8Gi"
+        cpu: "2"
+        memory: "16Gi"
       limits:
         cpu: "4"
-        memory: "16Gi"
     extraArgs:
       - --prune.mode=archive
       - --http.api=eth,net,web3,trace,debug,txpool,erigon,ots

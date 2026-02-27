@@ -5,7 +5,6 @@
 @using System.Text.Json
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
 
 <PageTitle>Haz Me Been Scammed? 🔍</PageTitle>
 
@@ -28,7 +27,7 @@
                    aria-label="Ethereum address or transaction hash" />
             <button class="btn btn-analyze"
                     @onclick="StartAnalysis"
-                    disabled="@(IsAnalyzing || !AltchaReady || string.IsNullOrWhiteSpace(InputValue))">
+                    disabled="@(IsAnalyzing || string.IsNullOrWhiteSpace(InputValue))">
                 @if (IsAnalyzing)
                 {
                     <span class="spinner-border spinner-border-sm me-2" role="status"></span>
@@ -49,7 +48,7 @@
                 📋 Sample Tx
             </button>
         </div>
-        <div class="altcha-container mt-2"></div>
+
     </div>
 
     @if (Events.Count > 0)
@@ -193,7 +192,7 @@
 @code {
     private string InputValue { get; set; } = "";
     private bool IsAnalyzing { get; set; }
-    private bool AltchaReady { get; set; }
+
     private List<AnalysisProgressEvent> Events { get; } = [];
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
     private ScamAnalysisResult? FinalResult { get; set; }
@@ -209,17 +208,6 @@
         if (!string.IsNullOrWhiteSpace(Address))
         {
             InputValue = Address;
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            // Wait for ALTCHA widget to auto-solve, then enable the button
-            var ready = await JS.InvokeAsync<bool>("waitForAltchaReady", 20000);
-            AltchaReady = ready;
-            StateHasChanged();
         }
     }
 
@@ -249,22 +237,11 @@
 
         try
         {
-            // Get the ALTCHA proof-of-work token (waits for solve if still pending)
-            var altchaToken = await JS.InvokeAsync<string>("getAltchaToken", 15000);
-            if (string.IsNullOrEmpty(altchaToken))
-            {
-                ErrorMessage = "Please wait for the security check to complete.";
-                IsAnalyzing = false;
-                StateHasChanged();
-                return;
-            }
-
-            // Update URL so people can share the link
             var trimmed = InputValue.Trim();
             Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
 
             var client = HttpClientFactory.CreateClient("api");
-            var url = $"/api/analyze?input={Uri.EscapeDataString(InputValue.Trim())}&altcha={Uri.EscapeDataString(altchaToken)}";
+            var url = $"/api/analyze?input={Uri.EscapeDataString(trimmed)}";
 
             using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
@@ -311,12 +288,6 @@
         finally
         {
             IsAnalyzing = false;
-            AltchaReady = false;
-            StateHasChanged();
-            // Reset: recreate widget, wait for it to solve, then re-enable button
-            await JS.InvokeVoidAsync("resetAltcha");
-            var ready = await JS.InvokeAsync<bool>("waitForAltchaReady", 20000);
-            AltchaReady = ready;
             StateHasChanged();
         }
     }
