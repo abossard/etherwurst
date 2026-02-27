@@ -221,7 +221,17 @@
         if (firstRender && _autoAnalyzePending)
         {
             _autoAnalyzePending = false;
-            await StartAnalysis();
+            // Wait for ALTCHA to solve before auto-analyzing
+            var token = await JS.InvokeAsync<string>("getAltchaToken", 15000);
+            if (!string.IsNullOrEmpty(token))
+            {
+                await StartAnalysis();
+            }
+            else
+            {
+                ErrorMessage = "Security check timed out. Please solve it and click Analyze.";
+                StateHasChanged();
+            }
         }
     }
 
@@ -251,9 +261,8 @@
 
         try
         {
-            // Get the ALTCHA proof-of-work token from the widget
-            var altchaToken = await JS.InvokeAsync<string>("eval",
-                "document.querySelector('altcha-widget')?.value || ''");
+            // Get the ALTCHA proof-of-work token (waits for solve if still pending)
+            var altchaToken = await JS.InvokeAsync<string>("getAltchaToken", 15000);
             if (string.IsNullOrEmpty(altchaToken))
             {
                 ErrorMessage = "Please wait for the security check to complete.";

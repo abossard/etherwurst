@@ -17,6 +17,23 @@
     <Routes />
     <script src="_framework/blazor.web.js"></script>
     <script async defer src="https://cdn.jsdelivr.net/npm/altcha@latest/dist/altcha.min.js" type="module"></script>
+    <script>
+        // Wait for ALTCHA widget to solve; returns the token or '' after timeout
+        window.getAltchaToken = function (timeoutMs) {
+            return new Promise(function (resolve) {
+                var w = document.querySelector('altcha-widget');
+                if (!w) { resolve(''); return; }
+                var v = w.value;
+                if (v) { resolve(v); return; }
+                var timer = setTimeout(function () { resolve(''); }, timeoutMs || 15000);
+                w.addEventListener('verified', function handler(e) {
+                    clearTimeout(timer);
+                    w.removeEventListener('verified', handler);
+                    resolve(w.value || '');
+                }, { once: true });
+            });
+        };
+    </script>
 </body>
 
 </html>
