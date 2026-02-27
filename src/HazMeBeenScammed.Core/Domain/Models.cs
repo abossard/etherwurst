@@ -120,3 +120,67 @@ public enum AnalysisStage
     Completed,
     Failed
 }
+
+/// <summary>
+/// Traversal direction when building wallet graphs.
+/// </summary>
+public enum GraphDirection
+{
+    Outgoing,
+    Incoming,
+    Both
+}
+
+/// <summary>
+/// Request settings for building a wallet flow graph.
+/// </summary>
+public record WalletGraphQuery(
+    WalletAddress Root,
+    int Depth = 2,
+    GraphDirection Direction = GraphDirection.Both,
+    decimal MinValueEth = 0m,
+    int MaxNodes = 500,
+    int MaxEdges = 1500,
+    int LookbackDays = 7
+);
+
+/// <summary>
+/// Node shown in the wallet graph.
+/// </summary>
+public record WalletGraphNode(
+    string Address,
+    string Label,
+    bool IsSeed,
+    bool IsContract,
+    int InboundCount,
+    int OutboundCount,
+    decimal TotalInEth,
+    decimal TotalOutEth
+);
+
+/// <summary>
+/// Directed edge between two wallets aggregated from one or more transactions.
+/// </summary>
+public record WalletGraphEdge(
+    string Id,
+    string From,
+    string To,
+    decimal TotalValueEth,
+    int TransactionCount,
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen,
+    string DominantToken
+);
+
+/// <summary>
+/// Result payload for wallet graph traversal.
+/// </summary>
+public record WalletGraphResult(
+    string Root,
+    int Depth,
+    GraphDirection Direction,
+    int NodeCount,
+    int EdgeCount,
+    IReadOnlyList<WalletGraphNode> Nodes,
+    IReadOnlyList<WalletGraphEdge> Edges
+);

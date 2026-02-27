@@ -1,8 +1,10 @@
 ﻿@page "/"
+@page "/{Address}"
 @rendermode InteractiveServer
 @using System.Net.Http
 @using System.Text.Json
 @inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
 
 <PageTitle>Haz Me Been Scammed? 🔍</PageTitle>
 
@@ -170,6 +172,17 @@
     private ScamAnalysisResult? FinalResult { get; set; }
     private string? ErrorMessage { get; set; }
 
+    [Parameter] public string? Address { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Address))
+        {
+            InputValue = Address;
+            await StartAnalysis();
+        }
+    }
+
     private void SetSample(string sample)
     {
         InputValue = sample;
@@ -193,6 +206,10 @@
 
         try
         {
+            // Update URL so people can share the link
+            var trimmed = InputValue.Trim();
+            Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
+
             var client = HttpClientFactory.CreateClient("api");
             var url = $"/api/analyze?input={Uri.EscapeDataString(InputValue.Trim())}";
 

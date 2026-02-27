@@ -36,41 +36,42 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     {
         _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
 
-        // Use Otterscan's ots_searchTransactionsAfter to page through history
-        var pageToken = 0UL;
-        var hasMore = true;
-        var yielded = 0;
-        const int maxResults = 25;
+        // Fetch all transactions in one large batch via Otterscan API
+        var result = await RpcCall<OtsSearchResult>(
+            "ots_searchTransactionsAfter",
+            [address.Value, 0, 1000],
+            cancellationToken);
 
-        while (hasMore && yielded < maxResults)
+        if (result?.Txs == null || result.Txs.Length == 0)
+        {
+            _logger.LogInformation("No transactions found for {Address}", address.Value);
+            yield break;
+        }
+
+        // Batch-fetch block timestamps
+        var blockTimestamps = new Dictionary<string, DateTimeOffset>();
+        foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null).Distinct())
+        {
+            var block = await RpcCall<RpcBlock>(
+                "eth_getBlockByNumber", [bn!, false], cancellationToken);
+            if (block?.Timestamp != null)
+                blockTimestamps[bn!] = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
+        }
+
+        foreach (var tx in result.Txs)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var result = await RpcCall<OtsSearchResult>(
-                "ots_searchTransactionsAfter",
-                [address.Value, pageToken, 10],
-                cancellationToken);
+            var receipt = await RpcCall<RpcReceipt>(
+                "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
 
-            if (result?.Txs == null || result.Txs.Length == 0)
-                break;
+            var timestamp = tx.BlockNumber != null && blockTimestamps.TryGetValue(tx.BlockNumber, out var ts)
+                ? ts : DateTimeOffset.UtcNow;
 
-            foreach (var tx in result.Txs)
-            {
-                if (yielded >= maxResults) break;
-
-                var receipt = await RpcCall<RpcReceipt>(
-                    "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
-
-                yield return MapTransaction(tx, receipt);
-                yielded++;
-            }
-
-            hasMore = !result.FirstPage;
-            if (result.Txs.Length > 0)
-                pageToken = HexToUlong(result.Txs[^1].BlockNumber);
+            yield return MapTransaction(tx, receipt, timestamp);
         }
 
-        _logger.LogInformation("Fetched {Count} transactions for {Address}", yielded, address.Value);
+        _logger.LogInformation("Fetched {Count} transactions for {Address}", result.Txs.Length, address.Value);
     }
 
     public async Task<TransactionInfo?> GetTransactionAsync(
@@ -87,7 +88,16 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         var receipt = await RpcCall<RpcReceipt>(
             "eth_getTransactionReceipt", [hash.Value], cancellationToken);
 
-        return MapTransaction(tx, receipt);
+        var timestamp = DateTimeOffset.UtcNow;
+        if (tx.BlockNumber != null)
+        {
+            var block = await RpcCall<RpcBlock>(
+                "eth_getBlockByNumber", [tx.BlockNumber, false], cancellationToken);
+            if (block?.Timestamp != null)
+                timestamp = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
+        }
+
+        return MapTransaction(tx, receipt, timestamp);
     }
 
     public async Task<ContractInfo?> GetContractInfoAsync(
@@ -168,14 +178,11 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
     // ─── Mapping ─────────────────────────────────────────────────────
 
-    private static TransactionInfo MapTransaction(RpcTransaction tx, RpcReceipt? receipt)
+    private static TransactionInfo MapTransaction(RpcTransaction tx, RpcReceipt? receipt, DateTimeOffset timestamp)
     {
         var valueWei = HexToBigDecimal(tx.Value ?? "0x0");
         var valueEth = valueWei / 1_000_000_000_000_000_000m;
         var isContract = !string.IsNullOrEmpty(tx.Input) && tx.Input != "0x";
-        var timestamp = tx.BlockNumber != null
-            ? DateTimeOffset.UtcNow // Will be refined below if we have block timestamp
-            : DateTimeOffset.UtcNow;
 
         var status = receipt?.Status switch
         {
@@ -303,6 +310,11 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         [property: JsonPropertyName("txs")] RpcTransaction[]? Txs,
         [property: JsonPropertyName("firstPage")] bool FirstPage,
         [property: JsonPropertyName("lastPage")] bool LastPage
+    );
+
+    private record RpcBlock(
+        [property: JsonPropertyName("timestamp")] string? Timestamp,
+        [property: JsonPropertyName("number")] string? Number
     );
 
     private record BlockscoutSmartContract(

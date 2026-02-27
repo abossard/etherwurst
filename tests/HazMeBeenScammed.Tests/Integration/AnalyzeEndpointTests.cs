@@ -75,4 +75,19 @@ public class AnalyzeEndpointTests(WebApplicationFactory<Program> factory)
         var response = await _client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetGraph_WithValidWallet_ReturnsGraphPayload()
+    {
+        var response = await _client.GetAsync(
+            "/api/graph?wallet=0x742d35Cc6634C0532925a3b844Bc454e4438f44e&depth=2&direction=both&maxNodes=200&maxEdges=400");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.Contains("nodeCount", content);
+        Assert.Contains("edgeCount", content);
+        Assert.Contains("nodes", content);
+        Assert.Contains("edges", content);
+    }
 }

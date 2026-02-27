@@ -35,6 +35,7 @@ else
     builder.Services.AddSingleton<IBlockchainAnalyticsPort, FakeBlockchainAnalyticsAdapter>();
 }
 builder.Services.AddScoped<IScamAnalysisPort, ScamAnalyzer>();
+builder.Services.AddScoped<IWalletGraphPort, WalletGraphService>();
 
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
@@ -84,6 +85,47 @@ app.MapGet("/api/analyze", async (
 .WithTags("Analysis")
 .WithSummary("Analyze a wallet address or transaction hash for scam patterns (SSE stream)")
 .Produces<AnalysisProgressEvent>(200, "text/event-stream");
+
+// GET /api/graph - builds a wallet flow graph for interactive visualization
+app.MapGet("/api/graph", async (
+    string wallet,
+    int depth,
+    string? direction,
+    decimal? minValueEth,
+    int? maxNodes,
+    int? maxEdges,
+    int? lookbackDays,
+    IWalletGraphPort graphPort,
+    CancellationToken cancellationToken) =>
+{
+    var normalizedWallet = wallet.Trim();
+    if (!WalletAddress.IsValid(normalizedWallet))
+    {
+        return Results.BadRequest(new { error = "Invalid wallet address format." });
+    }
+
+    if (!Enum.TryParse<GraphDirection>(direction ?? "Both", ignoreCase: true, out var parsedDirection))
+    {
+        parsedDirection = GraphDirection.Both;
+    }
+
+    var query = new WalletGraphQuery(
+        Root: new WalletAddress(normalizedWallet),
+        Depth: depth,
+        Direction: parsedDirection,
+        MinValueEth: minValueEth ?? 0m,
+        MaxNodes: maxNodes ?? 500,
+        MaxEdges: maxEdges ?? 1500,
+        LookbackDays: lookbackDays ?? 7);
+
+    var result = await graphPort.BuildGraphAsync(query, cancellationToken);
+    return Results.Ok(result);
+})
+.WithName("BuildWalletGraph")
+.WithTags("Graph")
+.WithSummary("Build a traversed wallet input/output graph for workbench visualization")
+.Produces<WalletGraphResult>(200)
+.Produces(400);
 
 app.Run();
 

@@ -1,0 +1,305 @@
+@page "/graph-workbench"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Wallet Graph Workbench</PageTitle>
+
+<div class="workbench-hero">
+    <div class="workbench-hero-copy">
+        <h1>Wallet Flow Workbench</h1>
+        <p>Traverse blockchain inputs and outputs, then tune the graph to inspect suspicious movement paths.</p>
+    </div>
+</div>
+
+<div class="graph-workbench">
+    <section class="workbench-toolbar card">
+        <div class="toolbar-grid">
+            <label>
+                Wallet
+                <input class="form-control" @bind="WalletInput" @bind:event="oninput" placeholder="0x..." />
+            </label>
+
+            <label>
+                Depth
+                <select class="form-select" @bind="Depth">
+                    @for (var i = 1; i <= 10; i++)
+                    {
+                        <option value="@i">@i</option>
+                    }
+                </select>
+            </label>
+
+            <label>
+                Direction
+                <select class="form-select" @bind="Direction">
+                    <option value="both">Both</option>
+                    <option value="incoming">Incoming</option>
+                    <option value="outgoing">Outgoing</option>
+                </select>
+            </label>
+
+            <label>
+                Min ETH
+                <input type="number" step="0.01" min="0" class="form-control" @bind="MinValueEth" />
+            </label>
+
+            <label>
+                Lookback Days
+                <input type="number" min="1" max="365" class="form-control" @bind="LookbackDays" />
+            </label>
+
+            <label>
+                Max Nodes
+                <input type="number" min="50" max="5000" class="form-control" @bind="MaxNodes" />
+            </label>
+
+            <label>
+                Max Edges
+                <input type="number" min="100" max="10000" class="form-control" @bind="MaxEdges" />
+            </label>
+
+            <label>
+                Layout
+                <select class="form-select" @bind="Layout">
+                    <option value="radial">Radial Tree</option>
+                    <option value="circular">Circular</option>
+                    <option value="grid">Grid</option>
+                    <option value="force">Force-ish</option>
+                </select>
+            </label>
+
+            <label>
+                Node Size
+                <input type="range" min="0.5" max="2.5" step="0.1" @bind="NodeSizeScale" />
+                <span class="range-value">@NodeSizeScale:F1</span>
+            </label>
+
+            <label>
+                Edge Opacity
+                <input type="range" min="0.1" max="1" step="0.05" @bind="EdgeOpacity" />
+                <span class="range-value">@EdgeOpacity:F2</span>
+            </label>
+
+            <label>
+                Labels
+                <select class="form-select" @bind="LabelMode">
+                    <option value="smart">Smart</option>
+                    <option value="all">All</option>
+                    <option value="none">None</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="toolbar-actions">
+            <button class="btn btn-graphle"
+                    @onclick="GraphleNowAsync"
+                    disabled="@IsLoading">
+                @if (IsLoading)
+                {
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    <span>Traversing...</span>
+                }
+                else
+                {
+                    <span>Graphle now!</span>
+                }
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="RepaintAsync" disabled="@(LatestGraph is null || IsLoading)">Repaint</button>
+            <button class="btn btn-outline-secondary" @onclick="FitAsync" disabled="@(LatestGraph is null || IsLoading)">Fit View</button>
+            <button class="btn btn-outline-secondary" @onclick="CaptureAsync" disabled="@(LatestGraph is null || IsLoading)">Screenshot</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="alert alert-danger mt-3">@Error</div>
+        }
+    </section>
+
+    <section class="workbench-stats card">
+        <div>
+            <span class="stat-label">Nodes</span>
+            <strong>@(LatestGraph?.NodeCount ?? 0)</strong>
+        </div>
+        <div>
+            <span class="stat-label">Edges</span>
+            <strong>@(LatestGraph?.EdgeCount ?? 0)</strong>
+        </div>
+        <div>
+            <span class="stat-label">Root</span>
+            <code>@(LatestGraph?.Root ?? "-")</code>
+        </div>
+    </section>
+
+    <section class="graph-stage card">
+        <div id="wallet-graph-canvas" class="wallet-graph-canvas"></div>
+    </section>
+</div>
+
+@code {
+    private const string GraphContainerId = "wallet-graph-canvas";
+
+    private IJSObjectReference? _graphModule;
+    private bool IsLoading { get; set; }
+    private string? Error { get; set; }
+
+    private string WalletInput { get; set; } = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
+    private int Depth { get; set; } = 3;
+    private string Direction { get; set; } = "both";
+    private decimal MinValueEth { get; set; } = 0m;
+    private int MaxNodes { get; set; } = 500;
+    private int MaxEdges { get; set; } = 1500;
+    private int LookbackDays { get; set; } = 7;
+
+    private string Layout { get; set; } = "radial";
+    private double NodeSizeScale { get; set; } = 1.0;
+    private double EdgeOpacity { get; set; } = 0.6;
+    private string LabelMode { get; set; } = "smart";
+
+    private WalletGraphResultDto? LatestGraph { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _graphModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/graphWorkbench.js");
+            await _graphModule.InvokeVoidAsync("initializeGraphWorkbench", GraphContainerId);
+        }
+    }
+
+    private async Task GraphleNowAsync()
+    {
+        if (string.IsNullOrWhiteSpace(WalletInput) || _graphModule is null)
+        {
+            return;
+        }
+
+        Error = null;
+        IsLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var wallet = Uri.EscapeDataString(WalletInput.Trim());
+            var query =
+                $"/api/graph?wallet={wallet}" +
+                $"&depth={Depth}" +
+                $"&direction={Direction}" +
+                $"&minValueEth={MinValueEth}" +
+                $"&maxNodes={MaxNodes}" +
+                $"&maxEdges={MaxEdges}" +
+                $"&lookbackDays={LookbackDays}";
+
+            var client = HttpClientFactory.CreateClient("api");
+            var graph = await client.GetFromJsonAsync<WalletGraphResultDto>(query);
+            if (graph is null)
+            {
+                Error = "No graph data returned.";
+                return;
+            }
+
+            LatestGraph = graph;
+            await RenderAsync();
+        }
+        catch (Exception ex)
+        {
+            Error = $"Graph request failed: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RepaintAsync()
+    {
+        if (LatestGraph is null)
+        {
+            return;
+        }
+
+        await RenderAsync();
+    }
+
+    private async Task RenderAsync()
+    {
+        if (_graphModule is null || LatestGraph is null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("renderWalletGraph", GraphContainerId, LatestGraph, new
+        {
+            layout = Layout,
+            nodeSizeScale = NodeSizeScale,
+            edgeOpacity = EdgeOpacity,
+            labelMode = LabelMode
+        });
+    }
+
+    private async Task FitAsync()
+    {
+        if (_graphModule is not null)
+        {
+            await _graphModule.InvokeVoidAsync("fitGraph", GraphContainerId);
+        }
+    }
+
+    private async Task CaptureAsync()
+    {
+        if (_graphModule is null)
+        {
+            return;
+        }
+
+        await _graphModule.InvokeVoidAsync("downloadGraphScreenshot", GraphContainerId);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_graphModule is not null)
+        {
+            try
+            {
+                await _graphModule.InvokeVoidAsync("disposeGraphWorkbench", GraphContainerId);
+                await _graphModule.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore disposal errors when circuit disconnects.
+            }
+        }
+    }
+
+    private record WalletGraphResultDto(
+        string Root,
+        int Depth,
+        string Direction,
+        int NodeCount,
+        int EdgeCount,
+        List<WalletGraphNodeDto> Nodes,
+        List<WalletGraphEdgeDto> Edges);
+
+    private record WalletGraphNodeDto(
+        string Address,
+        string Label,
+        bool IsSeed,
+        bool IsContract,
+        int InboundCount,
+        int OutboundCount,
+        decimal TotalInEth,
+        decimal TotalOutEth);
+
+    private record WalletGraphEdgeDto(
+        string Id,
+        string From,
+        string To,
+        decimal TotalValueEth,
+        int TransactionCount,
+        DateTimeOffset FirstSeen,
+        DateTimeOffset LastSeen,
+        string DominantToken);
+}
