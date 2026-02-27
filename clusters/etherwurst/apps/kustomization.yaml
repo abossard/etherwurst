@@ -5,3 +5,4 @@ resources:
   - lighthouse.yaml
   - otterscan.yaml
   - blockscout.yaml
+  - hazmebeenscammed.yaml
