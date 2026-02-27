@@ -43,6 +43,8 @@ spec:
             # Erigon RPC endpoint (cluster-internal)
             - name: Erigon__RpcUrl
               value: "http://erigon.ethereum.svc.cluster.local:8545"
+            - name: Blockscout__ApiUrl
+              value: "http://blockscout.blockscout.svc.cluster.local:4000"
           resources:
             requests:
               cpu: 100m

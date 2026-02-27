@@ -9,7 +9,7 @@ COPY ["HazMeBeenScammed.Core/HazMeBeenScammed.Core.csproj", "HazMeBeenScammed.Co
 COPY ["HazMeBeenScammed.ServiceDefaults/HazMeBeenScammed.ServiceDefaults.csproj", "HazMeBeenScammed.ServiceDefaults/"]
 RUN dotnet restore "HazMeBeenScammed.Web/HazMeBeenScammed.Web.csproj"
 COPY . .
-RUN dotnet publish "HazMeBeenScammed.Web/HazMeBeenScammed.Web.csproj" -c Release -o /app/publish --no-restore
+RUN dotnet publish "HazMeBeenScammed.Web/HazMeBeenScammed.Web.csproj" -c Release -o /app/publish
 
 FROM base AS final
 WORKDIR /app

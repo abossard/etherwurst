@@ -10,7 +10,30 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 // Hexagonal architecture: register ports and adapters
-builder.Services.AddSingleton<IBlockchainAnalyticsPort, FakeBlockchainAnalyticsAdapter>();
+// Use real Erigon adapter when endpoints are configured, otherwise fall back to fake
+var erigonUrl = builder.Configuration["Erigon:RpcUrl"];
+if (!string.IsNullOrEmpty(erigonUrl))
+{
+    builder.Services.AddHttpClient("erigon-rpc", client =>
+    {
+        client.BaseAddress = new Uri(erigonUrl);
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+    });
+
+    var blockscoutUrl = builder.Configuration["Blockscout:ApiUrl"] ?? "http://blockscout.blockscout.svc.cluster.local:4000";
+    builder.Services.AddHttpClient("blockscout", client =>
+    {
+        client.BaseAddress = new Uri(blockscoutUrl);
+        client.Timeout = TimeSpan.FromSeconds(15);
+    });
+
+    builder.Services.AddSingleton<IBlockchainAnalyticsPort, ErigonBlockchainAdapter>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlockchainAnalyticsPort, FakeBlockchainAnalyticsAdapter>();
+}
 builder.Services.AddScoped<IScamAnalysisPort, ScamAnalyzer>();
 
 builder.Services.AddOpenApi();
