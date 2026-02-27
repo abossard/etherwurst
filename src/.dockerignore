@@ -1,0 +1,14 @@
+# Build artifacts
+**/bin/
+**/obj/
+
+# Local tooling caches
+**/.vs/
+**/.vscode/
+
+# Development-only orchestration project (not needed in API/Web images)
+HazMeBeenScammed.AppHost/
+
+# Local user files
+**/*.user
+**/*.suo
