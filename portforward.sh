@@ -11,7 +11,7 @@ SERVICES=(
   "blockscout:blockscout:4000:4000:Blockscout UI"
   "monitoring:kube-prometheus-stack-grafana:3000:80:Grafana (admin/prom-operator)"
   "monitoring:prometheus-prometheus:9090:9090:Prometheus"
-  "flux-system:flux-operator:9080:9080:Flux UI"
+  "flux-system:flux-operator:9080:8080:Flux UI"
   "ethereum:erigon:8545:8545:Erigon JSON-RPC"
 )
 
