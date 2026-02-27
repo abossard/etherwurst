@@ -28,11 +28,15 @@ public class ScamAnalyzerTests
         var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
         var events = await _analyzer.AnalyzeAsync(request).ToListAsync();
 
-        var completedEvent = events.LastOrDefault();
+        var completedEvent = events.FirstOrDefault(e => e.Stage == AnalysisStage.Completed);
         Assert.NotNull(completedEvent);
-        Assert.Equal(AnalysisStage.Completed, completedEvent.Stage);
         Assert.NotNull(completedEvent.Result);
         Assert.Equal(100, completedEvent.ProgressPercent);
+
+        // Deep analysis follows the completed event for wallet analyses
+        var lastEvent = events.LastOrDefault();
+        Assert.NotNull(lastEvent);
+        Assert.True(lastEvent.Stage == AnalysisStage.DeepAnalysisComplete || lastEvent.Stage == AnalysisStage.Completed);
     }
 
     [Fact]
@@ -65,7 +69,7 @@ public class ScamAnalyzerTests
     {
         var request = new AnalysisRequest("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
         var events = await _analyzer.AnalyzeAsync(request).ToListAsync();
-        var result = events.Last().Result;
+        var result = events.FirstOrDefault(e => e.Stage == AnalysisStage.Completed)?.Result;
 
         Assert.NotNull(result);
         Assert.InRange(result.RiskScore, 0, 100);

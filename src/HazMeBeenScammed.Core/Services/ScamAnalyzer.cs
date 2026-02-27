@@ -106,6 +106,75 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnal
 
         yield return new AnalysisProgressEvent(id, AnalysisStage.Completed,
             "Analysis complete.", 100, result);
+
+        // ─── Phase 2: Deep Analysis — analyze counterparty addresses ─────
+        if (request.InputType == AnalysisInputType.WalletAddress && transactions.Count > 0)
+        {
+            var inputAddr = request.Input.ToLowerInvariant();
+            var counterparties = transactions
+                .SelectMany(tx => new[] { tx.From, tx.To })
+                .Where(a => !string.IsNullOrEmpty(a) && !a.Equals(inputAddr, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (counterparties.Count > 0)
+            {
+                yield return new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
+                    $"Deep analysis: scanning {counterparties.Count} counterparty address(es)...", 100);
+
+                var counterpartyScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var analyzed = 0;
+
+                foreach (var addr in counterparties)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    analyzed++;
+
+                    AnalysisProgressEvent? cpEvent = null;
+                    try
+                    {
+                        var cpTxs = new List<TransactionInfo>();
+                        var wallet = new WalletAddress(addr);
+                        await foreach (var tx in analytics.GetTransactionsForWalletAsync(wallet, cancellationToken))
+                            cpTxs.Add(tx);
+
+                        var cpIndicators = new List<ScamIndicator>();
+                        foreach (var tx in cpTxs)
+                        {
+                            if (tx.IsContractInteraction && tx.ContractName is null)
+                                cpIndicators.Add(new ScamIndicator(ScamIndicatorType.UnverifiedContract,
+                                    $"Unverified contract at {tx.To}", ScamSeverity.Warning));
+                            if (tx.ValueEth == 0 && !tx.IsContractInteraction)
+                                cpIndicators.Add(new ScamIndicator(ScamIndicatorType.ZeroValueTransfer,
+                                    $"Zero-value transfer", ScamSeverity.Info));
+                        }
+                        cpIndicators.AddRange(DetectPatterns(cpTxs));
+
+                        var (cpVerdict, cpScore, _) = ComputeVerdict(cpIndicators, cpTxs);
+                        counterpartyScores[addr] = cpScore;
+
+                        var combinedScore = ComputeCombinedScore(score, counterpartyScores);
+
+                        cpEvent = new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
+                            $"Analyzed {analyzed}/{counterparties.Count}: {addr[..8]}… (risk: {cpScore})",
+                            100, null,
+                            new CounterpartyRiskEvent(id, addr, cpScore, cpVerdict, cpTxs.Count, combinedScore));
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch
+                    {
+                        counterpartyScores[addr] = 0;
+                    }
+
+                    if (cpEvent is not null)
+                        yield return cpEvent;
+                }
+
+                var finalCombined = ComputeCombinedScore(score, counterpartyScores);
+                yield return new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysisComplete,
+                    $"Deep analysis complete. Combined risk score: {finalCombined}", 100);
+            }
+        }
     }
 
     private static IEnumerable<ScamIndicator> DetectPatterns(List<TransactionInfo> transactions)
@@ -183,5 +252,17 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics) : IScamAnal
         };
 
         return (verdict, score, summary);
+    }
+
+    /// <summary>
+    /// Combined score: own score contributes 40%, average counterparty score contributes 60%.
+    /// A clean wallet interacting mostly with scammers → high combined score (victim).
+    /// A scammy wallet interacting with clean wallets → moderate combined score.
+    /// </summary>
+    private static int ComputeCombinedScore(int ownScore, Dictionary<string, int> counterpartyScores)
+    {
+        if (counterpartyScores.Count == 0) return ownScore;
+        var avgCounterparty = (int)counterpartyScores.Values.Average();
+        return Math.Min(100, (int)(ownScore * 0.4 + avgCounterparty * 0.6));
     }
 }

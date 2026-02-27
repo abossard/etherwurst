@@ -108,13 +108,35 @@
                 {
                     <div class="transactions-section">
                         <h3>📋 Transactions Analyzed (@FinalResult.Transactions.Count total)</h3>
+
+                        @if (CombinedRiskScore is not null)
+                        {
+                            <div class="combined-score-bar mb-3 p-3 rounded" style="background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <span>
+                                        <strong>🔗 Combined Risk Score</strong>
+                                        <small class="text-muted ms-2">(own 40% + counterparty avg 60%)</small>
+                                    </span>
+                                    <span class="badge fs-6 @GetScoreBadgeClass(CombinedRiskScore.Value)">
+                                        @CombinedRiskScore
+                                    </span>
+                                </div>
+                                @if (DeepAnalysisMessage is not null)
+                                {
+                                    <small class="text-muted d-block mt-1">@DeepAnalysisMessage</small>
+                                }
+                            </div>
+                        }
+
                         <div class="table-responsive">
                             <table class="table table-sm table-hover">
                                 <thead>
                                     <tr>
                                         <th>Hash</th>
                                         <th>From</th>
+                                        <th>From Risk</th>
                                         <th>To / Contract</th>
+                                        <th>To Risk</th>
                                         <th>Value</th>
                                         <th>Token</th>
                                         <th>Status</th>
@@ -127,6 +149,7 @@
                                         <tr class="@(tx.Status == "Failed" ? "table-danger" : "")">
                                             <td><a href="/@tx.Hash" class="addr-link"><code class="hash-cell">@tx.Hash[..10]…</code></a></td>
                                             <td><a href="/@tx.From" class="addr-link"><code class="addr-cell">@tx.From[..8]…</code></a></td>
+                                            <td>@RiskBadge(tx.From)</td>
                                             <td>
                                                 @if (tx.ContractName is not null)
                                                 {
@@ -141,6 +164,7 @@
                                                     <a href="/@tx.To" class="addr-link"><code class="addr-cell">@tx.To[..8]…</code></a>
                                                 }
                                             </td>
+                                            <td>@RiskBadge(tx.To)</td>
                                             <td>@(tx.ValueEth > 0 ? $"{tx.ValueEth:F4} ETH" : "-")</td>
                                             <td>@(tx.TokenAmount > 0 ? $"{tx.TokenAmount:N0} {tx.TokenSymbol}" : "-")</td>
                                             <td><span class="badge @(tx.Status == "Success" ? "bg-success" : "bg-danger")">@tx.Status</span></td>
@@ -171,6 +195,9 @@
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
     private ScamAnalysisResult? FinalResult { get; set; }
     private string? ErrorMessage { get; set; }
+    private Dictionary<string, CounterpartyRiskEvent> CounterpartyRisks { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private int? CombinedRiskScore { get; set; }
+    private string? DeepAnalysisMessage { get; set; }
 
     [Parameter] public string? Address { get; set; }
 
@@ -201,6 +228,9 @@
         Events.Clear();
         FinalResult = null;
         ErrorMessage = null;
+        CounterpartyRisks.Clear();
+        CombinedRiskScore = null;
+        DeepAnalysisMessage = null;
         IsAnalyzing = true;
         StateHasChanged();
 
@@ -235,6 +265,14 @@
                         Events.Add(evt);
                         if (evt.Result is not null)
                             FinalResult = evt.Result;
+                        if (evt.CounterpartyRisk is not null)
+                        {
+                            CounterpartyRisks[evt.CounterpartyRisk.Address] = evt.CounterpartyRisk;
+                            CombinedRiskScore = evt.CounterpartyRisk.CombinedRiskScore;
+                            DeepAnalysisMessage = evt.Message;
+                        }
+                        if (evt.Stage == AnalysisStage.DeepAnalysisComplete)
+                            DeepAnalysisMessage = evt.Message;
                         if (evt.Stage == AnalysisStage.Failed)
                             ErrorMessage = evt.Message;
                         StateHasChanged();
@@ -293,13 +331,40 @@
         _ => "🔵"
     };
 
+    private RenderFragment RiskBadge(string address) => builder =>
+    {
+        if (CounterpartyRisks.TryGetValue(address, out var risk))
+        {
+            var cls = risk.RiskScore switch
+            {
+                >= 70 => "bg-danger",
+                >= 40 => "bg-warning text-dark",
+                >= 15 => "bg-info text-dark",
+                _ => "bg-secondary"
+            };
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", $"badge {cls}");
+            builder.AddAttribute(2, "title", $"{risk.TransactionCount} txs analyzed");
+            builder.AddContent(3, risk.RiskScore.ToString());
+            builder.CloseElement();
+        }
+        else if (DeepAnalysisMessage is not null)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "spinner-border spinner-border-sm text-muted");
+            builder.AddAttribute(2, "role", "status");
+            builder.CloseElement();
+        }
+    };
+
     // Local copies of enums/records for the frontend (avoids tight coupling to Core)
     private record AnalysisProgressEvent(
         string AnalysisId,
         AnalysisStage Stage,
         string Message,
         int ProgressPercent,
-        ScamAnalysisResult? Result = null);
+        ScamAnalysisResult? Result = null,
+        CounterpartyRiskEvent? CounterpartyRisk = null);
 
     private record ScamAnalysisResult(
         string AnalysisId,
@@ -332,8 +397,16 @@
     private enum AnalysisStage
     {
         Started, FetchingTransactions, AnalyzingContracts,
-        DetectingPatterns, ComputingScore, Completed, Failed
+        DetectingPatterns, ComputingScore, Completed, DeepAnalysis, DeepAnalysisComplete, Failed
     }
+
+    private record CounterpartyRiskEvent(
+        string AnalysisId,
+        string Address,
+        int RiskScore,
+        ScamVerdict Verdict,
+        int TransactionCount,
+        int CombinedRiskScore);
 
     private enum ScamVerdict { Clean, Suspicious, LikelyScam, ConfirmedScam }
     private enum ScamSeverity { Info, Warning, High, Critical }

@@ -107,7 +107,8 @@ public record AnalysisProgressEvent(
     AnalysisStage Stage,
     string Message,
     int ProgressPercent,
-    ScamAnalysisResult? Result = null
+    ScamAnalysisResult? Result = null,
+    CounterpartyRiskEvent? CounterpartyRisk = null
 );
 
 public enum AnalysisStage
@@ -118,8 +119,22 @@ public enum AnalysisStage
     DetectingPatterns,
     ComputingScore,
     Completed,
+    DeepAnalysis,
+    DeepAnalysisComplete,
     Failed
 }
+
+/// <summary>
+/// SSE event for a single counterparty risk score update during deep analysis.
+/// </summary>
+public record CounterpartyRiskEvent(
+    string AnalysisId,
+    string Address,
+    int RiskScore,
+    ScamVerdict Verdict,
+    int TransactionCount,
+    int CombinedRiskScore
+);
 
 /// <summary>
 /// Traversal direction when building wallet graphs.
