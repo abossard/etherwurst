@@ -9,11 +9,12 @@ A research collection for running a high-performance Ethereum API (like Ethersca
 | [01 - Ethereum Clients Compared](./01-ethereum-clients.md) | Geth vs Reth vs Erigon — which client for which use case |
 | [02 - Block Explorers & APIs](./02-block-explorers.md) | Self-hosted Etherscan alternatives: Blockscout, Otterscan, and API layers |
 | [03 - AKS Deployment & Storage](./03-aks-deployment.md) | Azure Kubernetes Service setup with Ultra SSDs and Helm charts |
-| [04 - Indexing & ETL](./04-indexing-etl.md) | Blockchain indexers: Ponder, HyperIndex, The Graph, ethereum-etl, cryo |
-| [05 - Analytics Platform](./05-analytics-platform.md) | Databricks, ClickHouse, and analytics databases for on-chain data |
-| [06 - AI Investigation Agents](./06-ai-agents.md) | AI agents that take addresses, investigate transactions, produce reports |
-| [07 - Architecture & Roadmap](./07-architecture.md) | End-to-end architecture and implementation roadmap |
-| [08 - Resources & Links](./08-resources-links.md) | Curated list of every tool, repo, and reference |
+| [04 - Azure Developer CLI (azd)](./04-azd-integration.md) | One-command deploy: infra provisioning + Helm charts + port forwarding + browser automation via `azd` |
+| [05 - Indexing & ETL](./05-indexing-etl.md) | Blockchain indexers: Ponder, HyperIndex, The Graph, ethereum-etl, cryo |
+| [06 - Analytics Platform](./06-analytics-platform.md) | Databricks, ClickHouse, and analytics databases for on-chain data |
+| [07 - AI Investigation Agents](./07-ai-agents.md) | AI agents that take addresses, investigate transactions, produce reports |
+| [08 - Architecture & Roadmap](./08-architecture.md) | End-to-end architecture and implementation roadmap |
+| [09 - Resources & Links](./09-resources-links.md) | Curated list of every tool, repo, and reference |
 
 ## The Goal
 
