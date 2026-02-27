@@ -50,7 +50,7 @@
             </button>
         </div>
         <div class="mt-2">
-            <altcha-widget challengeurl="/api/altcha/challenge" auto="onload" hidefooter></altcha-widget>
+            <altcha-widget challengeurl="/api/altcha/challenge" hidefooter></altcha-widget>
         </div>
     </div>
 
@@ -221,17 +221,7 @@
         if (firstRender && _autoAnalyzePending)
         {
             _autoAnalyzePending = false;
-            // Wait for ALTCHA to solve before auto-analyzing
-            var token = await JS.InvokeAsync<string>("getAltchaToken", 15000);
-            if (!string.IsNullOrEmpty(token))
-            {
-                await StartAnalysis();
-            }
-            else
-            {
-                ErrorMessage = "Security check timed out. Please solve it and click Analyze.";
-                StateHasChanged();
-            }
+            await StartAnalysis();
         }
     }
 
@@ -323,9 +313,6 @@
         finally
         {
             IsAnalyzing = false;
-            // Reset ALTCHA widget for next analysis
-            await JS.InvokeVoidAsync("eval",
-                "document.querySelector('altcha-widget')?.reset()");
             StateHasChanged();
         }
     }
