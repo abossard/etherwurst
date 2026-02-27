@@ -25,7 +25,7 @@ spec:
               protocol: TCP
           env:
             - name: ERIGON_URL
-              value: "http://erigon:8545"
+              value: "http://localhost:8545"
           resources:
             requests:
               cpu: "100m"
