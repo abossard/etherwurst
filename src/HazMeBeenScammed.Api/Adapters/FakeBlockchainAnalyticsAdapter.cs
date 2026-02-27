@@ -38,7 +38,7 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         WalletAddress address,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await Task.Delay(120, cancellationToken);
+        await Task.Delay(8, cancellationToken);
 
         var normalizedWallet = NormalizeAddress(address.Value);
         var transactions = WalletTransactionCache.GetOrAdd(normalizedWallet, GenerateDeterministicNeighborhoodTransactions);
@@ -46,7 +46,6 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         foreach (var tx in transactions)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await Task.Delay(35, cancellationToken);
             yield return tx;
         }
     }
@@ -55,7 +54,7 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         TransactionHash hash,
         CancellationToken cancellationToken = default)
     {
-        await Task.Delay(150, cancellationToken);
+        await Task.Delay(15, cancellationToken);
         var random = CreateDeterministicRandom(hash.Value);
 
         return GenerateFakeTransaction(
@@ -69,7 +68,7 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         string address,
         CancellationToken cancellationToken = default)
     {
-        await Task.Delay(60, cancellationToken);
+        await Task.Delay(10, cancellationToken);
         var random = CreateDeterministicRandom(address);
 
         if (random.Next(3) == 0) return null; // 1/3 chance not a contract

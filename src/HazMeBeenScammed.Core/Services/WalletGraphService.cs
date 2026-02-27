@@ -8,6 +8,8 @@ namespace HazMeBeenScammed.Core.Services;
 /// </summary>
 public sealed class WalletGraphService(IBlockchainAnalyticsPort blockchain) : IWalletGraphPort
 {
+    private const int MaxTransactionsPerWallet = 30;
+
     public async Task<WalletGraphResult> BuildGraphAsync(
         WalletGraphQuery query,
         CancellationToken cancellationToken = default)
@@ -38,9 +40,15 @@ public sealed class WalletGraphService(IBlockchainAnalyticsPort blockchain) : IW
                 continue;
             }
 
+            var processedForWallet = 0;
             await foreach (var tx in blockchain.GetTransactionsForWalletAsync(new WalletAddress(current), cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                processedForWallet++;
+                if (processedForWallet > MaxTransactionsPerWallet)
+                {
+                    break;
+                }
 
                 if (tx.Timestamp < minTime || tx.ValueEth < query.MinValueEth)
                 {

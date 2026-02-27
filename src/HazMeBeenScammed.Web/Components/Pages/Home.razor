@@ -107,7 +107,7 @@
                 @if (FinalResult.Transactions.Count > 0)
                 {
                     <div class="transactions-section">
-                        <h3>📋 Transactions Analyzed</h3>
+                        <h3>📋 Transactions Analyzed (@FinalResult.Transactions.Count total)</h3>
                         <div class="table-responsive">
                             <table class="table table-sm table-hover">
                                 <thead>
@@ -122,7 +122,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach (var tx in FinalResult.Transactions)
+                                    @foreach (var tx in PagedTransactions)
                                     {
                                         <tr class="@(tx.Status == "Failed" ? "table-danger" : "")">
                                             <td><code class="hash-cell">@tx.Hash[..10]…</code></td>
@@ -144,12 +144,22 @@
                                             <td>@(tx.ValueEth > 0 ? $"{tx.ValueEth:F4} ETH" : "-")</td>
                                             <td>@(tx.TokenAmount > 0 ? $"{tx.TokenAmount:N0} {tx.TokenSymbol}" : "-")</td>
                                             <td><span class="badge @(tx.Status == "Success" ? "bg-success" : "bg-danger")">@tx.Status</span></td>
-                                            <td>@tx.Timestamp.ToString("MM/dd HH:mm")</td>
+                                            <td>@tx.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
                                         </tr>
                                     }
                                 </tbody>
                             </table>
                         </div>
+                        @if (TotalPages > 1)
+                        {
+                            <nav class="d-flex justify-content-between align-items-center mt-2">
+                                <span class="text-muted">Page @(CurrentPage + 1) of @TotalPages</span>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-secondary me-1" disabled="@(CurrentPage == 0)" @onclick="PrevPage">← Prev</button>
+                                    <button class="btn btn-sm btn-outline-secondary" disabled="@(CurrentPage >= TotalPages - 1)" @onclick="NextPage">Next →</button>
+                                </div>
+                            </nav>
+                        }
                     </div>
                 }
             </div>
@@ -173,6 +183,15 @@
     private string? ErrorMessage { get; set; }
 
     [Parameter] public string? Address { get; set; }
+
+    // Pagination
+    private const int PageSize = 50;
+    private int CurrentPage { get; set; }
+    private int TotalPages => FinalResult is null ? 0 : (int)Math.Ceiling(FinalResult.Transactions.Count / (double)PageSize);
+    private List<TransactionInfo> PagedTransactions => FinalResult?.Transactions
+        .Skip(CurrentPage * PageSize).Take(PageSize).ToList() ?? [];
+    private void NextPage() { if (CurrentPage < TotalPages - 1) CurrentPage++; }
+    private void PrevPage() { if (CurrentPage > 0) CurrentPage--; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -201,6 +220,7 @@
         Events.Clear();
         FinalResult = null;
         ErrorMessage = null;
+        CurrentPage = 0;
         IsAnalyzing = true;
         StateHasChanged();
 
