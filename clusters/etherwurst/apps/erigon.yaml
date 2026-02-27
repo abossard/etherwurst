@@ -18,6 +18,8 @@ spec:
     image:
       repository: erigontech/erigon
       tag: v3.3.8
+    caplin:
+      enabled: true
     persistence:
       enabled: true
       storageClassName: managed-csi-premium
@@ -35,6 +37,9 @@ spec:
       - --ws.compression
       - --private.api.addr=0.0.0.0:9090
       - --db.pagesize=16KB
+      - --caplin.checkpoint-sync-url=https://mainnet-checkpoint-sync.stakely.io
+      - --beacon.api=beacon,config,node
+      - --beacon.api.addr=0.0.0.0
     p2pNodePort:
       enabled: false
     tolerations:

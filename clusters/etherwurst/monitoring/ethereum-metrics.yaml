@@ -17,7 +17,7 @@ spec:
     fullnameOverride: eth-metrics
     config:
       executionUrl: http://erigon.ethereum.svc.cluster.local:8545
-      consensusUrl: http://lighthouse.ethereum.svc.cluster.local:5052
+      consensusUrl: http://erigon.ethereum.svc.cluster.local:5555
     resources:
       requests:
         cpu: "50m"
