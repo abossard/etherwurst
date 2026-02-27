@@ -139,4 +139,75 @@
         </ol>
         <p>ELI5: quick look -> detective look -> microscope look 🔍🕵️‍♂️🔬</p>
     </section>
+
+    <section class="lab-card">
+        <h2>Methods Appendix (Exact Thresholds)</h2>
+        <div class="lab-matrix-wrap">
+            <table class="lab-matrix">
+                <thead>
+                    <tr>
+                        <th>Rule</th>
+                        <th>Current Value</th>
+                        <th>Where Used</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Counterparty concentration</td>
+                        <td><code>&gt; 0.60</code> with at least <code>6</code> counterparties</td>
+                        <td>Portfolio heuristic</td>
+                    </tr>
+                    <tr>
+                        <td>Wallet age anomaly</td>
+                        <td>wallet age <code>&lt;= 7 days</code> and any tx <code>&gt;= 10 ETH</code></td>
+                        <td>Portfolio heuristic</td>
+                    </tr>
+                    <tr>
+                        <td>Failed transaction spike</td>
+                        <td>failed ratio <code>&gt; 0.40</code> with at least <code>6</code> tx</td>
+                        <td>Portfolio heuristic</td>
+                    </tr>
+                    <tr>
+                        <td>Approval-drain window</td>
+                        <td>outflow within <code>15 min</code> and value <code>&gt;= 0.5 ETH</code></td>
+                        <td>Verifiable correlation</td>
+                    </tr>
+                    <tr>
+                        <td>Bytecode template risk</td>
+                        <td>bytecode string length <code>&lt; 260</code></td>
+                        <td>Verifiable contract profile</td>
+                    </tr>
+                    <tr>
+                        <td>Tx scan cap (receipt checks)</td>
+                        <td>first <code>80</code> tx only</td>
+                        <td>Performance guardrail</td>
+                    </tr>
+                    <tr>
+                        <td>Contract scan cap</td>
+                        <td>first <code>20</code> distinct contract addresses</td>
+                        <td>Performance guardrail</td>
+                    </tr>
+                    <tr>
+                        <td>Proxy slot</td>
+                        <td><code>0x360894a13ba1...d382bbc</code> (EIP-1967 implementation slot)</td>
+                        <td>Verifiable proxy check</td>
+                    </tr>
+                    <tr>
+                        <td>High-risk selector flag</td>
+                        <td>input starts with <code>0xb6f9de95</code></td>
+                        <td>Selector anomaly check</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="lab-footnote">
+            Score multipliers by confidence: <code>Low=0.6</code>, <code>Medium=1.0</code>, <code>High=1.25</code>, <code>Verified=1.5</code>.
+        </p>
+        <p class="lab-footnote">
+            Last synced from analyzer logic in
+            <code>src/HazMeBeenScammed.Core/Services/ScamAnalyzer.cs</code>
+            and model metadata in
+            <code>src/HazMeBeenScammed.Core/Domain/Models.cs</code>.
+        </p>
+    </section>
 </div>
