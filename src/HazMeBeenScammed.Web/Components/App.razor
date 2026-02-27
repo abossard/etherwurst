@@ -20,15 +20,19 @@
     <script>
         // Read ALTCHA token; if not yet solved, wait for 'verified' event
         window.getAltchaToken = function (timeoutMs) {
+            console.log('[ALTCHA] getAltchaToken called');
             return new Promise(function (resolve) {
                 var w = document.querySelector('altcha-widget');
-                if (!w) { resolve(''); return; }
+                if (!w) { console.warn('[ALTCHA] widget not found'); resolve(''); return; }
                 var v = w.value;
+                console.log('[ALTCHA] current value:', v ? v.substring(0, 30) + '...' : '(empty)');
                 if (v) { resolve(v); return; }
-                var timer = setTimeout(function () { resolve(''); }, timeoutMs || 15000);
+                console.log('[ALTCHA] waiting for verified event (timeout: ' + (timeoutMs || 15000) + 'ms)');
+                var timer = setTimeout(function () { console.warn('[ALTCHA] timed out waiting'); resolve(''); }, timeoutMs || 15000);
                 w.addEventListener('verified', function handler() {
                     clearTimeout(timer);
                     w.removeEventListener('verified', handler);
+                    console.log('[ALTCHA] verified! token:', (w.value || '').substring(0, 30) + '...');
                     resolve(w.value || '');
                 }, { once: true });
             });
@@ -36,8 +40,16 @@
         // Reset ALTCHA widget so it auto-solves a fresh challenge
         window.resetAltcha = function () {
             var w = document.querySelector('altcha-widget');
-            if (w) w.reset();
+            if (w) { w.reset(); console.log('[ALTCHA] widget reset'); }
         };
+        // Log ALTCHA lifecycle events
+        document.addEventListener('DOMContentLoaded', function () {
+            var w = document.querySelector('altcha-widget');
+            if (w) {
+                w.addEventListener('statechange', function (e) { console.log('[ALTCHA] state:', e.detail?.state || e.detail); });
+                w.addEventListener('verified', function () { console.log('[ALTCHA] auto-solved on load'); });
+            }
+        });
     </script>
 </body>
 
