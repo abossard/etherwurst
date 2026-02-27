@@ -6,12 +6,12 @@
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
 
-<PageTitle>Haz Me Been Scammed? 🔍</PageTitle>
+<PageTitle>CheckMyEthereum.com</PageTitle>
 
 <div class="scam-hero">
     <div class="scam-hero-content">
-        <h1 class="scam-title">🔍 Haz Me Been Scammed?</h1>
-        <p class="scam-subtitle">Enter an Ethereum wallet address or transaction hash to analyze for scam patterns.</p>
+        <h1 class="scam-title">CheckMyEthereum.com</h1>
+        <p class="scam-subtitle">Enter an Ethereum wallet address or transaction hash to run a best-effort risk analysis.</p>
     </div>
 </div>
 
@@ -266,7 +266,19 @@
                     {
                         Events.Add(evt);
                         if (evt.Result is not null)
+                        {
                             FinalResult = evt.Result;
+                            // Add the input address's own risk score so its cells show a badge too
+                            var inputAddr = evt.Result.Input;
+                            if (!string.IsNullOrEmpty(inputAddr))
+                            {
+                                CounterpartyRisks[inputAddr] = new CounterpartyRiskEvent(
+                                    evt.Result.AnalysisId, inputAddr, evt.Result.RiskScore,
+                                    evt.Result.Verdict, evt.Result.Transactions.Count, evt.Result.RiskScore);
+                            }
+                        }
+                        if (evt.Stage == AnalysisStage.DeepAnalysis && !DeepAnalysisInProgress)
+                            DeepAnalysisInProgress = true;
                         if (evt.CounterpartyRisk is not null)
                         {
                             CounterpartyRisks[evt.CounterpartyRisk.Address] = evt.CounterpartyRisk;
@@ -301,6 +313,7 @@
     private static string GetProgressBarClass(AnalysisStage stage) => stage switch
     {
         AnalysisStage.Failed => "bg-danger",
+        AnalysisStage.DeepAnalysisComplete => "bg-success",
         AnalysisStage.Completed => "bg-success",
         _ => "progress-bar-striped progress-bar-animated"
     };

@@ -1,37 +1,20 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <div class="brand-block">
-            <a class="navbar-brand" href="">🔍 Haz Me Been Scammed?</a>
-            <p class="service-disclaimer">
-                Best-effort service: this site may disappear or shut down at any moment.
-            </p>
-            <a class="repo-link" href="https://github.com/abossard/etherwurst" target="_blank" rel="noopener noreferrer">
-                <span class="bi bi-github-nav-menu" aria-hidden="true"></span>
-                View Source on GitHub
-            </a>
+﻿<nav class="top-nav" aria-label="Primary">
+    <div class="top-nav-main">
+        <a class="brand" href="">CheckMyEthereum.com</a>
+
+        <div class="top-nav-links">
+            <NavLink class="top-link" href="" Match="NavLinkMatch.All">Analyze</NavLink>
+            <NavLink class="top-link" href="graph-workbench">Graph Workbench</NavLink>
+            <NavLink class="top-link" href="heuristics-lab">Detection Lab</NavLink>
         </div>
+
+        <a class="repo-link" href="https://github.com/abossard/etherwurst" target="_blank" rel="noopener noreferrer">
+            GitHub
+        </a>
     </div>
-</div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Analyze
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="graph-workbench">
-                <span class="bi bi-diagram-3-fill" aria-hidden="true"></span> Graph Workbench
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="heuristics-lab">
-                <span class="bi bi-flask-fill" aria-hidden="true"></span> Scam Detection Lab
-            </NavLink>
-        </div>
-    </nav>
-</div>
+    <p class="service-disclaimer">
+        Best effort only. Results can be wrong, incomplete, or unavailable. Always verify independently.
+    </p>
+</nav>
 
