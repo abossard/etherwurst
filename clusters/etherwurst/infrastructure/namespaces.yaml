@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ethereum
+  labels:
+    app.kubernetes.io/part-of: etherwurst
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blockscout
+  labels:
+    app.kubernetes.io/part-of: etherwurst
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: etherwurst

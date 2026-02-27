@@ -1,0 +1,43 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blockscout
+  namespace: blockscout
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: blockscout
+      sourceRef:
+        kind: HelmRepository
+        name: ethereum-helm-charts
+        namespace: flux-system
+  values:
+    fullnameOverride: blockscout
+    config:
+      ETHEREUM_JSONRPC_HTTP_URL: http://erigon.ethereum.svc.cluster.local:8545
+      ETHEREUM_JSONRPC_TRACE_URL: http://erigon.ethereum.svc.cluster.local:8545
+      ETHEREUM_JSONRPC_WS_URL: ws://erigon.ethereum.svc.cluster.local:8546
+      ETHEREUM_JSONRPC_VARIANT: erigon
+      CHAIN_ID: "1"
+      COIN: ETH
+      NETWORK: Ethereum
+      SUBNETWORK: Mainnet
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    postgresql:
+      enabled: true
+      image:
+        registry: docker.io
+        repository: bitnami/postgresql
+        tag: "latest"
+      persistence:
+        enabled: true
+        storageClass: managed-csi-premium
+        size: 50Gi

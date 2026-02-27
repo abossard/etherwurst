@@ -1,0 +1,63 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: erigon
+  namespace: ethereum
+spec:
+  interval: 1h
+  timeout: 30m
+  chart:
+    spec:
+      chart: erigon
+      sourceRef:
+        kind: HelmRepository
+        name: ethereum-helm-charts
+        namespace: flux-system
+  values:
+    fullnameOverride: erigon
+    image:
+      repository: erigontech/erigon
+      tag: v3.0.5
+    persistence:
+      enabled: true
+      storageClassName: managed-csi-premium
+      size: 100Gi
+      accessModes:
+        - ReadWriteOnce
+    resources:
+      requests:
+        cpu: "1"
+        memory: "8Gi"
+      limits:
+        cpu: "4"
+        memory: "16Gi"
+    extraArgs:
+      - --prune.mode=archive
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,trace,debug,txpool,erigon,ots
+      - --http.vhosts=*
+      - --http.corsdomain=*
+      - --ws
+      - --ws.port=8546
+      - --ws.compression
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --private.api.addr=0.0.0.0:9090
+    p2pNodePort:
+      enabled: false
+    tolerations:
+      - key: ethereum-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: workload-type
+                  operator: In
+                  values: ["ethereum"]

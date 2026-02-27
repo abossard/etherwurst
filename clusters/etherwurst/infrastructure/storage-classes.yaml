@@ -1,0 +1,29 @@
+# Premium SSD v2 for Erigon hot state (domain + idx + chaindata)
+# Note: Ultra SSD requires --enable-ultra-ssd on the AKS node pool.
+# Using PremiumV2_LRS as a high-perf option that doesn't need special node pool config.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: premium-ssd-v2
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: PremiumV2_LRS
+  cachingMode: None
+  DiskIOPSReadWrite: "50000"
+  DiskMBpsReadWrite: "1000"
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# Standard Premium SSD for cold history, consensus layer, databases
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: premium-ssd-retain
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+  cachingMode: ReadOnly
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
