@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HazMeBeenScammed.Api/HazMeBeenScammed.Api.csproj" />
+    <Project Path="src/HazMeBeenScammed.AppHost/HazMeBeenScammed.AppHost.csproj" />
+    <Project Path="src/HazMeBeenScammed.Core/HazMeBeenScammed.Core.csproj" />
+    <Project Path="src/HazMeBeenScammed.ServiceDefaults/HazMeBeenScammed.ServiceDefaults.csproj" />
+    <Project Path="src/HazMeBeenScammed.Web/HazMeBeenScammed.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HazMeBeenScammed.Tests/HazMeBeenScammed.Tests.csproj" />
+  </Folder>
+</Solution>
