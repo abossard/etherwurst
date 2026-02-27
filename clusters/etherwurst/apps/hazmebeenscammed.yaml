@@ -183,13 +183,6 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /api
-      backendRefs:
-        - name: hazmebeenscammed-api
-          port: 80
-    - matches:
-        - path:
-            type: PathPrefix
             value: /
       backendRefs:
         - name: hazmebeenscammed-web
