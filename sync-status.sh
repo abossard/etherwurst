@@ -16,10 +16,12 @@ show_status() {
   if [ "$erigon_status" = "Running" ]; then
     sync_line=$(kubectl logs erigon-0 -n ethereum --tail=20 2>/dev/null | grep -E "\[1/6 OtterSync\] Downloading|Sync finished|OtterSync.*done" | tail -1)
     if [ -n "$sync_line" ]; then
-      progress=$(echo "$sync_line" | grep -oP 'progress="\K[^"]+' || echo "unknown")
+      progress=$(echo "$sync_line" | sed -n 's/.*progress="\([^"]*\)".*/\1/p')
+      [ -z "$progress" ] && progress="unknown"
       printf "║     Status: ⏳ Syncing — %s\n" "$progress"
     else
-      stage=$(kubectl logs erigon-0 -n ethereum --tail=5 2>/dev/null | grep -oP '\[\d+/\d+ \w+\]' | tail -1 || echo "starting")
+      stage=$(kubectl logs erigon-0 -n ethereum --tail=5 2>/dev/null | sed -n 's/.*\(\[[0-9]*\/[0-9]* [A-Za-z]*\]\).*/\1/p' | tail -1)
+      [ -z "$stage" ] && stage="starting"
       printf "║     Status: ⏳ %s\n" "$stage"
     fi
   else
