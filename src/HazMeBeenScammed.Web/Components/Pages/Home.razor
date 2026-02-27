@@ -5,6 +5,7 @@
 @using System.Text.Json
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Haz Me Been Scammed? 🔍</PageTitle>
 
@@ -47,6 +48,9 @@
             <button class="btn btn-sm btn-outline-secondary" @onclick='() => SetSample("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b")'>
                 📋 Sample Tx
             </button>
+        </div>
+        <div class="mt-2">
+            <altcha-widget challengeurl="/api/altcha/challenge" auto="onload" hidefooter></altcha-widget>
         </div>
     </div>
 
@@ -236,12 +240,23 @@
 
         try
         {
+            // Get the ALTCHA proof-of-work token from the widget
+            var altchaToken = await JS.InvokeAsync<string>("eval",
+                "document.querySelector('altcha-widget')?.value || ''");
+            if (string.IsNullOrEmpty(altchaToken))
+            {
+                ErrorMessage = "Please wait for the security check to complete.";
+                IsAnalyzing = false;
+                StateHasChanged();
+                return;
+            }
+
             // Update URL so people can share the link
             var trimmed = InputValue.Trim();
             Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
 
             var client = HttpClientFactory.CreateClient("api");
-            var url = $"/api/analyze?input={Uri.EscapeDataString(InputValue.Trim())}";
+            var url = $"/api/analyze?input={Uri.EscapeDataString(InputValue.Trim())}&altcha={Uri.EscapeDataString(altchaToken)}";
 
             using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
@@ -288,6 +303,9 @@
         finally
         {
             IsAnalyzing = false;
+            // Reset ALTCHA widget for next analysis
+            await JS.InvokeVoidAsync("eval",
+                "document.querySelector('altcha-widget')?.reset()");
             StateHasChanged();
         }
     }
