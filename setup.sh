@@ -51,17 +51,17 @@ preflight() {
   log "Running preflight checks..."
 
   local missing=()
-  for cmd in kubectl helm flux kustomize; do
+  for cmd in kubectl helm flux kustomize az; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
   done
   if [ ${#missing[@]} -ne 0 ]; then
     err "Missing required tools: ${missing[*]}"
-    err "Install with: brew install kubectl helm fluxcd/tap/flux kustomize"
+    err "Install with: brew install kubectl helm fluxcd/tap/flux kustomize azure-cli"
     exit 1
   fi
-  ok "All tools available (kubectl, helm, flux, kustomize)"
+  ok "All tools available (kubectl, helm, flux, kustomize, az)"
 
   if ! kubectl cluster-info &>/dev/null; then
     err "Cannot connect to Kubernetes cluster. Check your kubeconfig."
@@ -78,6 +78,44 @@ preflight() {
   local node_count
   node_count=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
   log "  Nodes: ${node_count}"
+
+  # Check AKS Application Routing add-on
+  check_app_routing
+}
+
+# ─── AKS Application Routing Add-on ─────────────────────────────────
+# The Application Routing add-on provides a managed NGINX ingress
+# controller for AKS. It is required for external access to services
+# like Otterscan, Blockscout, and Grafana without manual port-forwards.
+#
+# Docs: https://learn.microsoft.com/en-us/azure/aks/app-routing
+#
+# To enable manually:
+#   az aks approuting enable -g <resource-group> -n <cluster-name>
+#
+check_app_routing() {
+  log "Checking AKS Application Routing add-on..."
+
+  # Detect cluster name and resource group from current context
+  local cluster_name rg routing_json enabled
+
+  cluster_name=$(az aks list --query '[0].name' -o tsv 2>/dev/null) || true
+  rg=$(az aks list --query '[0].resourceGroup' -o tsv 2>/dev/null) || true
+
+  if [ -z "$cluster_name" ] || [ -z "$rg" ]; then
+    warn "Could not detect AKS cluster via 'az aks list' — skipping app routing check"
+    return
+  fi
+
+  routing_json=$(az aks show -g "$rg" -n "$cluster_name" --query 'ingressProfile.webAppRouting' -o json 2>/dev/null) || true
+  enabled=$(echo "$routing_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('enabled', False))" 2>/dev/null) || true
+
+  if [ "$enabled" = "True" ]; then
+    ok "AKS Application Routing add-on: enabled (cluster: ${cluster_name})"
+  else
+    warn "AKS Application Routing add-on: NOT enabled"
+    log "  Enable with: az aks approuting enable -g ${rg} -n ${cluster_name}"
+  fi
 }
 
 # ─── Validate YAMLs ─────────────────────────────────────────────────
@@ -181,6 +219,10 @@ status() {
     log "HelmReleases:"
     kubectl get helmreleases -A --no-headers 2>/dev/null | sed 's/^/     /' || warn "  none found"
   fi
+  echo ""
+
+  # AKS Application Routing
+  check_app_routing
   echo ""
 
   # Workloads
