@@ -25,9 +25,6 @@ spec:
       requests:
         cpu: "500m"
         memory: "4Gi"
-      limits:
-        cpu: "2"
-        memory: "8Gi"
     extraArgs:
       - --execution-endpoint=http://erigon:8551
     checkpointSync:

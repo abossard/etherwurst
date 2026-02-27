@@ -38,8 +38,8 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     {
         _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
 
-        const int PageSize = 20; // Erigon max is 25, stay safely under
-        const int MaxTransactions = 1000;
+        const int PageSize = 25; // Erigon max is 25, stay safely under
+        const int MaxTransactions = 666;
 
         // ots_searchTransactionsBefore with block 0 = start from latest, walk backwards
         var pageToken = 0UL;

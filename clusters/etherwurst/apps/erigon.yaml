@@ -21,7 +21,7 @@ spec:
     persistence:
       enabled: true
       storageClassName: managed-csi-premium
-      size: 100Gi
+      size: 2Ti
       accessModes:
         - ReadWriteOnce
     resources:
@@ -34,6 +34,7 @@ spec:
       - --http.corsdomain=*
       - --ws.compression
       - --private.api.addr=0.0.0.0:9090
+      - --db.pagesize=16KB
     p2pNodePort:
       enabled: false
     tolerations:

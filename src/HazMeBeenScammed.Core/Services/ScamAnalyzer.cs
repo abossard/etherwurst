@@ -124,6 +124,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
                 .SelectMany(tx => new[] { tx.From, tx.To })
                 .Where(a => !string.IsNullOrEmpty(a) && !a.Equals(inputAddr, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(100)
                 .ToList();
 
             if (counterparties.Count > 0)
