@@ -28,7 +28,7 @@
                    aria-label="Ethereum address or transaction hash" />
             <button class="btn btn-analyze"
                     @onclick="StartAnalysis"
-                    disabled="@(IsAnalyzing || string.IsNullOrWhiteSpace(InputValue))">
+                    disabled="@(IsAnalyzing || !AltchaReady || string.IsNullOrWhiteSpace(InputValue))">
                 @if (IsAnalyzing)
                 {
                     <span class="spinner-border spinner-border-sm me-2" role="status"></span>
@@ -49,9 +49,7 @@
                 📋 Sample Tx
             </button>
         </div>
-        <div class="mt-2">
-            <altcha-widget challengeurl="/api/altcha/challenge" auto="onload" hidefooter style="display:none"></altcha-widget>
-        </div>
+        <div class="altcha-container mt-2"></div>
     </div>
 
     @if (Events.Count > 0)
@@ -195,6 +193,7 @@
 @code {
     private string InputValue { get; set; } = "";
     private bool IsAnalyzing { get; set; }
+    private bool AltchaReady { get; set; }
     private List<AnalysisProgressEvent> Events { get; } = [];
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
     private ScamAnalysisResult? FinalResult { get; set; }
@@ -205,23 +204,22 @@
 
     [Parameter] public string? Address { get; set; }
 
-    private bool _autoAnalyzePending;
-
     protected override void OnInitialized()
     {
         if (!string.IsNullOrWhiteSpace(Address))
         {
             InputValue = Address;
-            _autoAnalyzePending = true;
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _autoAnalyzePending)
+        if (firstRender)
         {
-            _autoAnalyzePending = false;
-            await StartAnalysis();
+            // Wait for ALTCHA widget to auto-solve, then enable the button
+            var ready = await JS.InvokeAsync<bool>("waitForAltchaReady", 20000);
+            AltchaReady = ready;
+            StateHasChanged();
         }
     }
 
@@ -313,8 +311,12 @@
         finally
         {
             IsAnalyzing = false;
-            // Reset widget so it auto-solves a fresh challenge for next analysis
+            AltchaReady = false;
+            StateHasChanged();
+            // Reset: recreate widget, wait for it to solve, then re-enable button
             await JS.InvokeVoidAsync("resetAltcha");
+            var ready = await JS.InvokeAsync<bool>("waitForAltchaReady", 20000);
+            AltchaReady = ready;
             StateHasChanged();
         }
     }

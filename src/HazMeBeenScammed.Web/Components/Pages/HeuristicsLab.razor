@@ -51,58 +51,50 @@
     </section>
 
     <section class="lab-card">
-        <h2>Signal Matrix (Science + ELI5)</h2>
+        <h2>Signal Matrix (Scientific layout, ELI5 text)</h2>
         <div class="lab-matrix-wrap">
             <table class="lab-matrix">
                 <thead>
                     <tr>
                         <th>Signal</th>
-                        <th>Scientific Test</th>
-                        <th>ELI5</th>
+                        <th>Check (ELI5)</th>
                         <th>Type</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td>Counterparty concentration</td>
-                        <td>Top counterparties > 60% of interactions.</td>
-                        <td>All candy keeps going to one kid 🍬</td>
+                        <td>Most activity keeps flowing to a tiny group, like all candy going to one kid.</td>
                         <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
                     </tr>
                     <tr>
                         <td>Wallet age anomaly</td>
-                        <td>Wallet younger than 7 days with high-value transfers.</td>
-                        <td>Brand-new account acting rich on day one 🎭</td>
+                        <td>A brand-new wallet starts moving big money right away.</td>
                         <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
                     </tr>
                     <tr>
                         <td>Failed transaction spike</td>
-                        <td>Failure ratio above 40% over recent activity.</td>
-                        <td>Someone keeps trying wrong keys 🔑</td>
+                        <td>Many recent transactions fail, like someone trying the wrong keys over and over.</td>
                         <td><span class="lab-tag tag-heuristic">Heuristic</span></td>
                     </tr>
                     <tr>
                         <td>Proxy upgradeability risk</td>
-                        <td>Read EIP-1967 implementation slot and verify implementation code.</td>
-                        <td>Check if the puppet has a hidden puppeteer 🎎</td>
+                        <td>We check whether this contract can secretly swap its brain later.</td>
                         <td><span class="lab-tag tag-verified">Verifiable</span></td>
                     </tr>
                     <tr>
                         <td>Approval -> drain correlation</td>
-                        <td>Approval event followed by rapid outflow in a short time window.</td>
-                        <td>You gave a key, toys disappeared fast 🗝️➡️🕳️</td>
+                        <td>You gave spending permission, then funds left quickly right after.</td>
                         <td><span class="lab-tag tag-verified">Verifiable</span></td>
                     </tr>
                     <tr>
                         <td>Event log anomaly</td>
-                        <td>Successful call but missing expected approval/transfer-style logs.</td>
-                        <td>Receipt says paid, scanner never beeped 🧾</td>
+                        <td>The transaction says success, but expected transfer-style breadcrumbs are missing.</td>
                         <td><span class="lab-tag tag-verified">Verifiable</span></td>
                     </tr>
                     <tr>
                         <td>Bytecode similarity risk</td>
-                        <td>Code shape and size resemble known drainer templates.</td>
-                        <td>Same costume, same villain moves 🦹</td>
+                        <td>The contract code looks very similar to known drainer patterns.</td>
                         <td><span class="lab-tag tag-verified">Verifiable</span></td>
                     </tr>
                 </tbody>

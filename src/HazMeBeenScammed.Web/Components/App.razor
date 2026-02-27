@@ -18,36 +18,108 @@
     <script src="_framework/blazor.web.js"></script>
     <script async defer src="https://cdn.jsdelivr.net/npm/altcha@latest/dist/altcha.min.js" type="module"></script>
     <script>
-        // Read ALTCHA token; if not yet solved, wait for 'verified' event
+        // Create a fresh ALTCHA widget inside the container
+        function createAltchaWidget() {
+            var container = document.querySelector('.altcha-container');
+            if (!container) return null;
+            var old = container.querySelector('altcha-widget');
+            if (old) old.remove();
+            var w = document.createElement('altcha-widget');
+            w.setAttribute('challengeurl', '/api/altcha/challenge');
+            w.setAttribute('auto', 'onload');
+            w.setAttribute('hidefooter', '');
+            w.style.display = 'none';
+            container.appendChild(w);
+            w.addEventListener('statechange', function (e) { console.log('[ALTCHA] state:', e.detail?.state || e.detail); });
+            console.log('[ALTCHA] widget created, auto-solving...');
+            return w;
+        }
+
+        // Get ALTCHA token: use pre-solved value or recreate widget and wait
         window.getAltchaToken = function (timeoutMs) {
             console.log('[ALTCHA] getAltchaToken called');
             return new Promise(function (resolve) {
-                var w = document.querySelector('altcha-widget');
-                if (!w) { console.warn('[ALTCHA] widget not found'); resolve(''); return; }
-                var v = w.value;
-                console.log('[ALTCHA] current value:', v ? v.substring(0, 30) + '...' : '(empty)');
-                if (v) { resolve(v); return; }
-                console.log('[ALTCHA] waiting for verified event (timeout: ' + (timeoutMs || 15000) + 'ms)');
-                var timer = setTimeout(function () { console.warn('[ALTCHA] timed out waiting'); resolve(''); }, timeoutMs || 15000);
-                w.addEventListener('verified', function handler() {
-                    clearTimeout(timer);
-                    w.removeEventListener('verified', handler);
-                    console.log('[ALTCHA] verified! token:', (w.value || '').substring(0, 30) + '...');
-                    resolve(w.value || '');
-                }, { once: true });
+                var timeout = timeoutMs || 15000;
+
+                function doGet() {
+                    var container = document.querySelector('.altcha-container');
+                    if (!container) { console.warn('[ALTCHA] container not found'); resolve(''); return; }
+                    var w = container.querySelector('altcha-widget');
+                    // If widget already has a solved token, use it
+                    if (w && w.value) {
+                        console.log('[ALTCHA] using pre-solved token');
+                        resolve(w.value);
+                        return;
+                    }
+                    // No token available — recreate widget for a fresh challenge
+                    w = createAltchaWidget();
+                    if (!w) { console.warn('[ALTCHA] could not create widget'); resolve(''); return; }
+                    console.log('[ALTCHA] waiting for solve (timeout: ' + timeout + 'ms)');
+                    var timer = setTimeout(function () { console.warn('[ALTCHA] timed out waiting'); resolve(''); }, timeout);
+                    w.addEventListener('verified', function () {
+                        clearTimeout(timer);
+                        console.log('[ALTCHA] verified! token:', (w.value || '').substring(0, 30) + '...');
+                        resolve(w.value || '');
+                    }, { once: true });
+                }
+
+                // Wait for ALTCHA script to load (async defer) before creating widget
+                if (customElements.get('altcha-widget')) {
+                    doGet();
+                } else {
+                    console.log('[ALTCHA] waiting for script to load...');
+                    customElements.whenDefined('altcha-widget').then(doGet);
+                }
             });
         };
-        // Reset ALTCHA widget so it auto-solves a fresh challenge
+
+        // After analysis: remove widget so next getAltchaToken creates a fresh one
         window.resetAltcha = function () {
-            var w = document.querySelector('altcha-widget');
-            if (w) { w.reset(); console.log('[ALTCHA] widget reset'); }
+            var container = document.querySelector('.altcha-container');
+            if (!container) return;
+            var w = container.querySelector('altcha-widget');
+            if (w) { w.remove(); console.log('[ALTCHA] widget removed'); }
+            // Pre-create a new widget so it auto-solves for next analysis
+            createAltchaWidget();
         };
-        // Log ALTCHA lifecycle events
+
+        // Wait until ALTCHA widget has a solved token (returns true/false)
+        window.waitForAltchaReady = function (timeoutMs) {
+            console.log('[ALTCHA] waitForAltchaReady called');
+            return new Promise(function (resolve) {
+                var timeout = timeoutMs || 20000;
+
+                function doWait() {
+                    var container = document.querySelector('.altcha-container');
+                    if (!container) { resolve(false); return; }
+                    var w = container.querySelector('altcha-widget');
+                    if (!w) { w = createAltchaWidget(); }
+                    if (w && w.value) { console.log('[ALTCHA] already ready'); resolve(true); return; }
+                    var timer = setTimeout(function () { console.warn('[ALTCHA] ready timeout'); resolve(false); }, timeout);
+                    w.addEventListener('verified', function () {
+                        clearTimeout(timer);
+                        console.log('[ALTCHA] ready!');
+                        resolve(true);
+                    }, { once: true });
+                }
+
+                if (customElements.get('altcha-widget')) {
+                    doWait();
+                } else {
+                    customElements.whenDefined('altcha-widget').then(doWait);
+                }
+            });
+        };
+
+        // Create initial widget on page load
         document.addEventListener('DOMContentLoaded', function () {
-            var w = document.querySelector('altcha-widget');
-            if (w) {
-                w.addEventListener('statechange', function (e) { console.log('[ALTCHA] state:', e.detail?.state || e.detail); });
-                w.addEventListener('verified', function () { console.log('[ALTCHA] auto-solved on load'); });
+            // Wait for ALTCHA script to define the custom element
+            if (customElements.get('altcha-widget')) {
+                createAltchaWidget();
+            } else {
+                customElements.whenDefined('altcha-widget').then(function () {
+                    createAltchaWidget();
+                });
             }
         });
     </script>
