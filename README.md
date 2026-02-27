@@ -1,6 +1,6 @@
 # Haz Me Been Scammed? 🔍
 
-An example application that uses the Ethereum infrastructure of the Etherwurst project to analyze wallet addresses and transactions for potential scam activity.
+An example application built as part of the [Etherwurst](../docs/README.md) project — a research collection for running high-performance Ethereum APIs on Azure. This app analyzes Ethereum wallet addresses and transactions for potential scam activity.
 
 ## Architecture
 
