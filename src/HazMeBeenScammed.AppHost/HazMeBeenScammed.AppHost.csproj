@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireHost>true</IsAspireHost>
+    <!-- Set by Aspire.AppHost.Sdk in new projects; ensures .NET 10 SDK deprecation check passes -->
+    <AspireHostingSDKVersion>9.2.0</AspireHostingSDKVersion>
+    <UserSecretsId>aspire-HazMeBeenScammed-AppHost</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HazMeBeenScammed.Api\HazMeBeenScammed.Api.csproj" IsAspireProjectResource="true" />
+    <ProjectReference Include="..\HazMeBeenScammed.Web\HazMeBeenScammed.Web.csproj" IsAspireProjectResource="true" />
+  </ItemGroup>
+
+</Project>

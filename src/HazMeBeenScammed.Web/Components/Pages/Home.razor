@@ -1,0 +1,324 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using System.Net.Http
+@using System.Text.Json
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Haz Me Been Scammed? 🔍</PageTitle>
+
+<div class="scam-hero">
+    <div class="scam-hero-content">
+        <h1 class="scam-title">🔍 Haz Me Been Scammed?</h1>
+        <p class="scam-subtitle">Enter an Ethereum wallet address or transaction hash to analyze for scam patterns.</p>
+    </div>
+</div>
+
+<div class="scam-container">
+    <div class="scam-input-card">
+        <div class="input-group mb-3">
+            <input @bind="InputValue"
+                   @bind:event="oninput"
+                   @onkeydown="HandleKeyDown"
+                   class="form-control scam-input"
+                   placeholder="0x... (wallet address or transaction hash)"
+                   disabled="@IsAnalyzing"
+                   aria-label="Ethereum address or transaction hash" />
+            <button class="btn btn-analyze"
+                    @onclick="StartAnalysis"
+                    disabled="@(IsAnalyzing || string.IsNullOrWhiteSpace(InputValue))">
+                @if (IsAnalyzing)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    <span>Analyzing...</span>
+                }
+                else
+                {
+                    <span>🔍 Analyze</span>
+                }
+            </button>
+        </div>
+        <div class="sample-inputs">
+            <span class="text-muted me-2">Try a sample:</span>
+            <button class="btn btn-sm btn-outline-secondary me-1" @onclick='() => SetSample("0x742d35Cc6634C0532925a3b844Bc454e4438f44e")'>
+                🦊 Sample Wallet
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick='() => SetSample("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b")'>
+                📋 Sample Tx
+            </button>
+        </div>
+    </div>
+
+    @if (Events.Count > 0)
+    {
+        <div class="progress-section">
+            @{
+                var latest = Events.LastOrDefault();
+            }
+            @if (latest is not null)
+            {
+                <div class="progress mb-2">
+                    <div class="progress-bar @GetProgressBarClass(latest.Stage)"
+                         role="progressbar"
+                         style="width: @latest.ProgressPercent%"
+                         aria-valuenow="@latest.ProgressPercent"
+                         aria-valuemin="0"
+                         aria-valuemax="100">
+                        @latest.ProgressPercent%
+                    </div>
+                </div>
+                <p class="progress-message text-muted">@latest.Message</p>
+            }
+        </div>
+
+        @if (FinalResult is not null)
+        {
+            <div class="result-card @GetVerdictClass(FinalResult.Verdict)">
+                <div class="result-header">
+                    <span class="result-verdict-icon">@GetVerdictIcon(FinalResult.Verdict)</span>
+                    <div>
+                        <h2 class="result-verdict">@FinalResult.Verdict.ToString().Replace("LikelyScam", "Likely Scam").Replace("ConfirmedScam", "Confirmed Scam")</h2>
+                        <p class="result-summary">@FinalResult.Summary</p>
+                    </div>
+                    <div class="risk-score-badge @GetScoreBadgeClass(FinalResult.RiskScore)">
+                        <span class="score-number">@FinalResult.RiskScore</span>
+                        <span class="score-label">Risk Score</span>
+                    </div>
+                </div>
+
+                @if (FinalResult.Indicators.Count > 0)
+                {
+                    <div class="indicators-section">
+                        <h3>🚩 Detected Indicators</h3>
+                        <div class="indicators-list">
+                            @foreach (var indicator in FinalResult.Indicators)
+                            {
+                                <div class="indicator-item indicator-@indicator.Severity.ToString().ToLower()">
+                                    <span class="indicator-icon">@GetSeverityIcon(indicator.Severity)</span>
+                                    <span class="indicator-text">@indicator.Description</span>
+                                    <span class="indicator-type badge">@indicator.Type</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (FinalResult.Transactions.Count > 0)
+                {
+                    <div class="transactions-section">
+                        <h3>📋 Transactions Analyzed</h3>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Hash</th>
+                                        <th>From</th>
+                                        <th>To / Contract</th>
+                                        <th>Value</th>
+                                        <th>Token</th>
+                                        <th>Status</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var tx in FinalResult.Transactions)
+                                    {
+                                        <tr class="@(tx.Status == "Failed" ? "table-danger" : "")">
+                                            <td><code class="hash-cell">@tx.Hash[..10]…</code></td>
+                                            <td><code class="addr-cell">@tx.From[..8]…</code></td>
+                                            <td>
+                                                @if (tx.ContractName is not null)
+                                                {
+                                                    <span class="badge bg-success">@tx.ContractName</span>
+                                                }
+                                                else if (tx.IsContractInteraction)
+                                                {
+                                                    <span class="badge bg-warning text-dark">⚠️ Unverified Contract</span>
+                                                }
+                                                else
+                                                {
+                                                    <code class="addr-cell">@tx.To[..8]…</code>
+                                                }
+                                            </td>
+                                            <td>@(tx.ValueEth > 0 ? $"{tx.ValueEth:F4} ETH" : "-")</td>
+                                            <td>@(tx.TokenAmount > 0 ? $"{tx.TokenAmount:N0} {tx.TokenSymbol}" : "-")</td>
+                                            <td><span class="badge @(tx.Status == "Success" ? "bg-success" : "bg-danger")">@tx.Status</span></td>
+                                            <td>@tx.Timestamp.ToString("MM/dd HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (ErrorMessage is not null)
+        {
+            <div class="alert alert-danger mt-3">
+                <strong>Error:</strong> @ErrorMessage
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string InputValue { get; set; } = "";
+    private bool IsAnalyzing { get; set; }
+    private List<AnalysisProgressEvent> Events { get; } = [];
+    private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
+    private ScamAnalysisResult? FinalResult { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    private void SetSample(string sample)
+    {
+        InputValue = sample;
+        StateHasChanged();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await StartAnalysis();
+    }
+
+    private async Task StartAnalysis()
+    {
+        if (string.IsNullOrWhiteSpace(InputValue) || IsAnalyzing) return;
+
+        Events.Clear();
+        FinalResult = null;
+        ErrorMessage = null;
+        IsAnalyzing = true;
+        StateHasChanged();
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("api");
+            var url = $"/api/analyze?input={Uri.EscapeDataString(InputValue.Trim())}";
+
+            using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new System.IO.StreamReader(stream);
+
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line?.StartsWith("data: ") == true)
+                {
+                    var json = line[6..];
+                    var evt = JsonSerializer.Deserialize<AnalysisProgressEvent>(json,
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                        {
+                            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase) }
+                        });
+                    if (evt is not null)
+                    {
+                        Events.Add(evt);
+                        if (evt.Result is not null)
+                            FinalResult = evt.Result;
+                        if (evt.Stage == AnalysisStage.Failed)
+                            ErrorMessage = evt.Message;
+                        StateHasChanged();
+                        await Task.Yield();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Connection error: {ex.Message}";
+        }
+        finally
+        {
+            IsAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string GetProgressBarClass(AnalysisStage stage) => stage switch
+    {
+        AnalysisStage.Failed => "bg-danger",
+        AnalysisStage.Completed => "bg-success",
+        _ => "progress-bar-striped progress-bar-animated"
+    };
+
+    private static string GetVerdictClass(ScamVerdict verdict) => verdict switch
+    {
+        ScamVerdict.ConfirmedScam => "result-card-danger",
+        ScamVerdict.LikelyScam => "result-card-warning",
+        ScamVerdict.Suspicious => "result-card-caution",
+        _ => "result-card-safe"
+    };
+
+    private static string GetVerdictIcon(ScamVerdict verdict) => verdict switch
+    {
+        ScamVerdict.ConfirmedScam => "☠️",
+        ScamVerdict.LikelyScam => "🚨",
+        ScamVerdict.Suspicious => "⚡",
+        _ => "✅"
+    };
+
+    private static string GetScoreBadgeClass(int score) => score switch
+    {
+        >= 70 => "score-danger",
+        >= 40 => "score-warning",
+        >= 15 => "score-caution",
+        _ => "score-safe"
+    };
+
+    private static string GetSeverityIcon(ScamSeverity severity) => severity switch
+    {
+        ScamSeverity.Critical => "🔴",
+        ScamSeverity.High => "🟠",
+        ScamSeverity.Warning => "🟡",
+        _ => "🔵"
+    };
+
+    // Local copies of enums/records for the frontend (avoids tight coupling to Core)
+    private record AnalysisProgressEvent(
+        string AnalysisId,
+        AnalysisStage Stage,
+        string Message,
+        int ProgressPercent,
+        ScamAnalysisResult? Result = null);
+
+    private record ScamAnalysisResult(
+        string AnalysisId,
+        string Input,
+        string InputType,
+        ScamVerdict Verdict,
+        int RiskScore,
+        string Summary,
+        List<TransactionInfo> Transactions,
+        List<ScamIndicator> Indicators,
+        DateTimeOffset AnalyzedAt);
+
+    private record TransactionInfo(
+        string Hash,
+        string From,
+        string To,
+        decimal ValueEth,
+        string TokenSymbol,
+        decimal TokenAmount,
+        bool IsContractInteraction,
+        string? ContractName,
+        DateTimeOffset Timestamp,
+        string Status);
+
+    private record ScamIndicator(
+        string Type,
+        string Description,
+        ScamSeverity Severity);
+
+    private enum AnalysisStage
+    {
+        Started, FetchingTransactions, AnalyzingContracts,
+        DetectingPatterns, ComputingScore, Completed, Failed
+    }
+
+    private enum ScamVerdict { Clean, Suspicious, LikelyScam, ConfirmedScam }
+    private enum ScamSeverity { Info, Warning, High, Critical }
+}
+

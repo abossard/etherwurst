@@ -1,0 +1,68 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using HazMeBeenScammed.Api.Adapters;
+using HazMeBeenScammed.Core.Domain;
+using HazMeBeenScammed.Core.Ports;
+using HazMeBeenScammed.Core.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.AddServiceDefaults();
+
+// Hexagonal architecture: register ports and adapters
+builder.Services.AddSingleton<IBlockchainAnalyticsPort, FakeBlockchainAnalyticsAdapter>();
+builder.Services.AddScoped<IScamAnalysisPort, ScamAnalyzer>();
+
+builder.Services.AddOpenApi();
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.WithOrigins(
+                builder.Configuration["AllowedOrigins"]?.Split(',') ?? ["http://localhost:5174", "https://localhost:7174"])
+              .AllowAnyHeader()
+              .AllowAnyMethod()));
+
+var app = builder.Build();
+
+app.MapDefaultEndpoints();
+
+if (app.Environment.IsDevelopment())
+    app.MapOpenApi();
+
+app.UseCors();
+app.UseHttpsRedirection();
+
+var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+{
+    Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+};
+
+// POST /api/analyze — starts analysis and streams SSE events
+app.MapGet("/api/analyze", async (
+    string input,
+    IScamAnalysisPort analyzer,
+    HttpContext http,
+    CancellationToken cancellationToken) =>
+{
+    http.Response.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers.Connection = "keep-alive";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
+
+    var request = new AnalysisRequest(input.Trim());
+
+    await foreach (var evt in analyzer.AnalyzeAsync(request, cancellationToken))
+    {
+        var json = JsonSerializer.Serialize(evt, jsonOptions);
+        await http.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
+        await http.Response.Body.FlushAsync(cancellationToken);
+    }
+})
+.WithName("AnalyzeInput")
+.WithTags("Analysis")
+.WithSummary("Analyze a wallet address or transaction hash for scam patterns (SSE stream)")
+.Produces<AnalysisProgressEvent>(200, "text/event-stream");
+
+app.Run();
+
+// Make Program accessible for integration testing
+public partial class Program { }
