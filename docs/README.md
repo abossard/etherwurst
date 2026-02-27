@@ -16,6 +16,7 @@ A research collection for running a high-performance Ethereum API (like Ethersca
 | [08 - Architecture & Roadmap](./08-architecture.md) | End-to-end architecture and implementation roadmap |
 | [09 - Resources & Links](./09-resources-links.md) | Curated list of every tool, repo, and reference |
 | [10 - Flux GitOps & UI](./10-flux-gitops.md) | Flux Operator, new Web UI, MCP Server, and cluster management |
+| [11 - Scam Detection Playbook](./11-scam-detection-playbook.md) | Simple heuristics, on-chain verifiable checks, and phased integration plan |
 
 ## The Goal
 

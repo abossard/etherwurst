@@ -11,6 +11,12 @@
 #   ./build-deploy.sh --deploy     # Deploy to cluster only (images must exist)
 #   ./build-deploy.sh --status     # Show deployment status
 #
+# Environment variables (NOT stored in repo):
+#   IMAGE_TAG            Override image tag (default: git short SHA)
+#
+# Private config:
+#   .private/gateway.yaml  Gateway + HTTPRoute with hostname (gitignored)
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,6 +60,9 @@ for arg in "$@"; do
       echo ""
       echo "Environment variables:"
       echo "  IMAGE_TAG  Override image tag (default: git short SHA)"
+      echo ""
+      echo "Private config:"
+      echo "  .private/gateway.yaml  Gateway + HTTPRoute with hostname (gitignored)"
       exit 0
       ;;
     *) err "Unknown argument: $arg"; exit 1 ;;
@@ -135,8 +144,19 @@ deploy() {
 
   log "Deploying HazMeBeenScammed to namespace '${NAMESPACE}'..."
 
-  # Substitute image tag in manifest and apply
+  # Apply workloads (Deployments + Services only, no Gateway/HTTPRoute)
   sed "s|__IMAGE_TAG__|${IMAGE_TAG}|g" "$manifest" | kubectl apply -f -
+
+  # Apply Gateway + HTTPRoute from .private/ if present (never committed to repo)
+  local gw_manifest="${SCRIPT_DIR}/.private/gateway.yaml"
+  if [ -f "$gw_manifest" ]; then
+    log "Applying Gateway + HTTPRoute from .private/gateway.yaml..."
+    kubectl apply -f "$gw_manifest"
+    ok "Gateway + routes applied"
+  else
+    warn "No .private/gateway.yaml found — skipping Gateway/HTTPRoute"
+    warn "Create .private/gateway.yaml with your hostname to enable ingress"
+  fi
 
   log "Waiting for rollout..."
   kubectl rollout status deployment/hazmebeenscammed-api -n "$NAMESPACE" --timeout=120s
@@ -157,6 +177,10 @@ show_status() {
   log "HazMeBeenScammed deployment status:"
   echo ""
   kubectl get deployment,svc,pods -n "$NAMESPACE" -l app.kubernetes.io/part-of=hazmebeenscammed 2>/dev/null | sed 's/^/  /' || warn "Nothing deployed yet"
+  echo ""
+
+  log "Gateway:"
+  kubectl get gateway,httproute -n "$NAMESPACE" 2>/dev/null | sed 's/^/  /' || warn "No gateway configured"
   echo ""
 
   log "ACR images:"

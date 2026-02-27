@@ -205,11 +205,22 @@
 
     [Parameter] public string? Address { get; set; }
 
-    protected override async Task OnInitializedAsync()
+    private bool _autoAnalyzePending;
+
+    protected override void OnInitialized()
     {
         if (!string.IsNullOrWhiteSpace(Address))
         {
             InputValue = Address;
+            _autoAnalyzePending = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _autoAnalyzePending)
+        {
+            _autoAnalyzePending = false;
             await StartAnalysis();
         }
     }

@@ -24,3 +24,6 @@ Properties/launchSettings.json.user
 
 # Rider
 .idea/
+
+# Private config (hostnames, secrets — never commit)
+.private/
