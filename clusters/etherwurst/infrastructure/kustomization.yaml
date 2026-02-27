@@ -5,3 +5,4 @@ resources:
   - storage-classes.yaml
   - helm-repositories.yaml
   - ethereum-nodepool.yaml
+  - flux-operator.yaml
