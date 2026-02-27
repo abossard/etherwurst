@@ -28,8 +28,6 @@ spec:
       requests:
         cpu: "2"
         memory: "16Gi"
-      limits:
-        cpu: "4"
     extraArgs:
       - --prune.mode=archive
       - --http.api=eth,net,web3,trace,debug,txpool,erigon,ots
