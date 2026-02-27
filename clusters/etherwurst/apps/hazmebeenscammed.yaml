@@ -24,7 +24,7 @@ spec:
         kubernetes.azure.com/nodepool-type: VirtualMachineScaleSets
       containers:
         - name: api
-          image: k8sdemoanbo.azurecr.io/hazmebeenscammed-api:33221a5 # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
+          image: k8sdemoanbo.azurecr.io/hazmebeenscammed-api:74c84c0 # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
           ports:
             - containerPort: 8080
               name: http
@@ -101,7 +101,7 @@ spec:
         kubernetes.azure.com/nodepool-type: VirtualMachineScaleSets
       containers:
         - name: web
-          image: k8sdemoanbo.azurecr.io/hazmebeenscammed-web:33221a5 # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
+          image: k8sdemoanbo.azurecr.io/hazmebeenscammed-web:74c84c0 # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
           ports:
             - containerPort: 8080
               name: http
