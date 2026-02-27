@@ -50,7 +50,7 @@
             </button>
         </div>
         <div class="mt-2">
-            <altcha-widget challengeurl="/api/altcha/challenge" hidefooter></altcha-widget>
+            <altcha-widget challengeurl="/api/altcha/challenge" auto="onload" hidefooter style="display:none"></altcha-widget>
         </div>
     </div>
 
@@ -313,6 +313,8 @@
         finally
         {
             IsAnalyzing = false;
+            // Reset widget so it auto-solves a fresh challenge for next analysis
+            await JS.InvokeVoidAsync("resetAltcha");
             StateHasChanged();
         }
     }

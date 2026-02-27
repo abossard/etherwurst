@@ -18,26 +18,25 @@
     <script src="_framework/blazor.web.js"></script>
     <script async defer src="https://cdn.jsdelivr.net/npm/altcha@latest/dist/altcha.min.js" type="module"></script>
     <script>
-        // Trigger ALTCHA solve and wait for the token; returns '' on timeout
+        // Read ALTCHA token; if not yet solved, wait for 'verified' event
         window.getAltchaToken = function (timeoutMs) {
             return new Promise(function (resolve) {
                 var w = document.querySelector('altcha-widget');
                 if (!w) { resolve(''); return; }
+                var v = w.value;
+                if (v) { resolve(v); return; }
                 var timer = setTimeout(function () { resolve(''); }, timeoutMs || 15000);
                 w.addEventListener('verified', function handler() {
                     clearTimeout(timer);
                     w.removeEventListener('verified', handler);
                     resolve(w.value || '');
                 }, { once: true });
-                // Reset and trigger fresh solve
-                w.reset();
-                // Programmatically start verification via internal checkbox
-                setTimeout(function () {
-                    var root = w.shadowRoot || w;
-                    var cb = root.querySelector('input[type="checkbox"]');
-                    if (cb && !cb.checked) cb.click();
-                }, 100);
             });
+        };
+        // Reset ALTCHA widget so it auto-solves a fresh challenge
+        window.resetAltcha = function () {
+            var w = document.querySelector('altcha-widget');
+            if (w) w.reset();
         };
     </script>
 </body>
