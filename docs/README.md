@@ -15,6 +15,7 @@ A research collection for running a high-performance Ethereum API (like Ethersca
 | [07 - AI Investigation Agents](./07-ai-agents.md) | AI agents that take addresses, investigate transactions, produce reports |
 | [08 - Architecture & Roadmap](./08-architecture.md) | End-to-end architecture and implementation roadmap |
 | [09 - Resources & Links](./09-resources-links.md) | Curated list of every tool, repo, and reference |
+| [10 - Flux GitOps & UI](./10-flux-gitops.md) | Flux Operator, new Web UI, MCP Server, and cluster management |
 
 ## The Goal
 

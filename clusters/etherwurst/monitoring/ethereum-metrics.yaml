@@ -1,0 +1,27 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ethereum-metrics-exporter
+  namespace: monitoring
+spec:
+  interval: 1h
+  timeout: 5m
+  chart:
+    spec:
+      chart: ethereum-metrics-exporter
+      sourceRef:
+        kind: HelmRepository
+        name: ethereum-helm-charts
+        namespace: flux-system
+  values:
+    fullnameOverride: eth-metrics
+    config:
+      executionUrl: http://erigon.ethereum.svc.cluster.local:8545
+      consensusUrl: http://lighthouse.ethereum.svc.cluster.local:5052
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"

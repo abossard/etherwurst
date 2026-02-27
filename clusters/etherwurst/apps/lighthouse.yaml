@@ -1,0 +1,37 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: lighthouse
+  namespace: ethereum
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: lighthouse
+      sourceRef:
+        kind: HelmRepository
+        name: ethereum-helm-charts
+        namespace: flux-system
+  values:
+    fullnameOverride: lighthouse
+    persistence:
+      enabled: true
+      storageClassName: managed-csi-premium
+      size: 50Gi
+      accessModes:
+        - ReadWriteOnce
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    extraArgs:
+      - --execution-endpoint=http://erigon:8551
+    checkpointSync:
+      enabled: true
+      url: "https://mainnet-checkpoint-sync.stakely.io"
+    p2pNodePort:
+      enabled: false
