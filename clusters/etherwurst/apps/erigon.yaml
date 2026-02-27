@@ -37,7 +37,7 @@ spec:
       - --ws.compression
       - --private.api.addr=0.0.0.0:9090
       - --db.pagesize=16KB
-      - --caplin.checkpoint-sync-url=https://mainnet-checkpoint-sync.stakely.io
+      - --caplin.checkpoint-sync-url=https://beaconstate.ethstaker.cc
       - --beacon.api=beacon,config,node
       - --beacon.api.addr=0.0.0.0
     p2pNodePort:
