@@ -36,42 +36,47 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     {
         _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
 
-        // Fetch all transactions in one large batch via Otterscan API
-        var result = await RpcCall<OtsSearchResult>(
-            "ots_searchTransactionsAfter",
-            [address.Value, 0, 1000],
-            cancellationToken);
-
-        if (result?.Txs == null || result.Txs.Length == 0)
-        {
-            _logger.LogInformation("No transactions found for {Address}", address.Value);
-            yield break;
-        }
-
-        // Batch-fetch block timestamps
+        // Erigon caps ots_searchTransactionsAfter at 25 per page — paginate through all
+        var pageToken = 0UL;
+        var hasMore = true;
         var blockTimestamps = new Dictionary<string, DateTimeOffset>();
-        foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null).Distinct())
-        {
-            var block = await RpcCall<RpcBlock>(
-                "eth_getBlockByNumber", [bn!, false], cancellationToken);
-            if (block?.Timestamp != null)
-                blockTimestamps[bn!] = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
-        }
 
-        foreach (var tx in result.Txs)
+        while (hasMore)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var receipt = await RpcCall<RpcReceipt>(
-                "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
+            var result = await RpcCall<OtsSearchResult>(
+                "ots_searchTransactionsAfter",
+                [address.Value, pageToken, 25],
+                cancellationToken);
 
-            var timestamp = tx.BlockNumber != null && blockTimestamps.TryGetValue(tx.BlockNumber, out var ts)
-                ? ts : DateTimeOffset.UtcNow;
+            if (result?.Txs == null || result.Txs.Length == 0)
+                break;
 
-            yield return MapTransaction(tx, receipt, timestamp);
+            // Batch-fetch block timestamps for new blocks in this page
+            foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null && !blockTimestamps.ContainsKey(b)).Distinct())
+            {
+                var block = await RpcCall<RpcBlock>(
+                    "eth_getBlockByNumber", [bn!, false], cancellationToken);
+                if (block?.Timestamp != null)
+                    blockTimestamps[bn!] = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
+            }
+
+            foreach (var tx in result.Txs)
+            {
+                var receipt = await RpcCall<RpcReceipt>(
+                    "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
+
+                var timestamp = tx.BlockNumber != null && blockTimestamps.TryGetValue(tx.BlockNumber, out var ts)
+                    ? ts : DateTimeOffset.UtcNow;
+
+                yield return MapTransaction(tx, receipt, timestamp);
+            }
+
+            hasMore = !result.FirstPage;
+            if (result.Txs.Length > 0)
+                pageToken = HexToUlong(result.Txs[^1].BlockNumber);
         }
-
-        _logger.LogInformation("Fetched {Count} transactions for {Address}", result.Txs.Length, address.Value);
     }
 
     public async Task<TransactionInfo?> GetTransactionAsync(

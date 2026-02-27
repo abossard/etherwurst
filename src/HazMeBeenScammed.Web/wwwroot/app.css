@@ -281,3 +281,151 @@ h1:focus {
     .result-header { flex-wrap: wrap; }
     .risk-score-badge { margin-left: 0; }
 }
+
+/* ===== Wallet Graph Workbench ===== */
+
+:root {
+    --workbench-bg-start: #f4f6f9;
+    --workbench-bg-end: #e6edf4;
+    --workbench-accent: #0f766e;
+    --workbench-accent-2: #f97316;
+    --workbench-ink: #0f172a;
+}
+
+.workbench-hero {
+    margin: -1.1rem -1rem 1.2rem -1rem;
+    padding: 1.75rem 1.25rem;
+    background:
+        radial-gradient(circle at 20% 30%, rgba(15, 118, 110, 0.22), transparent 55%),
+        radial-gradient(circle at 80% 20%, rgba(249, 115, 22, 0.2), transparent 50%),
+        linear-gradient(120deg, var(--workbench-bg-start), var(--workbench-bg-end));
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.workbench-hero h1 {
+    margin: 0;
+    font-size: 2rem;
+    color: var(--workbench-ink);
+    letter-spacing: -0.02em;
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.workbench-hero p {
+    margin-top: 0.4rem;
+    color: #334155;
+    max-width: 72ch;
+}
+
+.graph-workbench {
+    display: grid;
+    gap: 1rem;
+}
+
+.graph-workbench .card {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 14px;
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+.workbench-toolbar {
+    padding: 1rem;
+    background: #ffffff;
+}
+
+.toolbar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.8rem;
+}
+
+.toolbar-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #475569;
+}
+
+.toolbar-grid input[type="range"] {
+    width: 100%;
+}
+
+.range-value {
+    font-size: 0.75rem;
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.toolbar-actions {
+    margin-top: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.btn-graphle {
+    background: linear-gradient(120deg, var(--workbench-accent), #0b8f84);
+    color: #fff;
+    border: none;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.btn-graphle:hover:not(:disabled) {
+    background: linear-gradient(120deg, #0b8f84, var(--workbench-accent));
+    color: #fff;
+}
+
+.workbench-stats {
+    padding: 0.85rem 1rem;
+    background: linear-gradient(120deg, #ffffff, #f8fafc);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.4rem;
+    align-items: center;
+}
+
+.workbench-stats .stat-label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+}
+
+.workbench-stats strong {
+    font-size: 1.25rem;
+    color: #0f172a;
+}
+
+.graph-stage {
+    background: #fff;
+    padding: 0.75rem;
+}
+
+.wallet-graph-canvas {
+    width: 100%;
+    height: min(72vh, 760px);
+    min-height: 420px;
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+        linear-gradient(45deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+        #f8fafc;
+    background-size: 24px 24px, 24px 24px, auto;
+    background-position: 0 0, 12px 12px, 0 0;
+}
+
+@media (max-width: 900px) {
+    .workbench-hero h1 {
+        font-size: 1.55rem;
+    }
+
+    .wallet-graph-canvas {
+        height: min(66vh, 560px);
+        min-height: 360px;
+    }
+}

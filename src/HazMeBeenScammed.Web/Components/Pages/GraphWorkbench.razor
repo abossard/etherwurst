@@ -164,7 +164,7 @@
     {
         if (firstRender)
         {
-            _graphModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/graphWorkbench.js");
+            _graphModule = await JS.InvokeAsync<IJSObjectReference>("import", "/js/graphWorkbench.js");
             await _graphModule.InvokeVoidAsync("initializeGraphWorkbench", GraphContainerId);
         }
     }
