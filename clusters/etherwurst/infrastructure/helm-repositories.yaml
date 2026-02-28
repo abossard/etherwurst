@@ -27,3 +27,13 @@ spec:
   type: default
   interval: 1h
   url: https://grafana.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: altinity
+  namespace: flux-system
+spec:
+  type: default
+  interval: 1h
+  url: https://helm.altinity.com

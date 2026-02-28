@@ -6,3 +6,4 @@ resources:
   - otterscan.yaml
   - blockscout.yaml
   - hazmebeenscammed.yaml
+  - clickhouse.yaml

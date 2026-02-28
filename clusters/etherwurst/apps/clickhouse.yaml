@@ -1,0 +1,65 @@
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: ethereum-analytics
+  namespace: ethereum
+spec:
+  configuration:
+    clusters:
+      - name: analytics
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+    settings:
+      # Performance tuning for analytics workloads
+      max_memory_usage: "10000000000"
+      max_threads: "4"
+      max_query_size: "1073741824"
+    users:
+      etherwurst/password: "etherwurst-ch-2026"
+      etherwurst/networks/ip:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+      etherwurst/profile: default
+      etherwurst/quota: default
+    profiles:
+      default/max_memory_usage: "10000000000"
+      default/max_execution_time: "300"
+  defaults:
+    templates:
+      podTemplate: clickhouse-pod
+      dataVolumeClaimTemplate: data-volume
+      serviceTemplate: clickhouse-svc
+  templates:
+    serviceTemplates:
+      - name: clickhouse-svc
+        generateName: clickhouse-{chi}
+        spec:
+          ports:
+            - name: http
+              port: 8123
+            - name: tcp
+              port: 9000
+          type: ClusterIP
+    podTemplates:
+      - name: clickhouse-pod
+        spec:
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:24.12
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: "8Gi"
+                limits:
+                  cpu: "4"
+                  memory: "16Gi"
+    volumeClaimTemplates:
+      - name: data-volume
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: managed-csi-premium
+          resources:
+            requests:
+              storage: 500Gi
