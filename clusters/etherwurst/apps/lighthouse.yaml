@@ -27,11 +27,13 @@ spec:
       repository: sigp/lighthouse
       tag: v8.1.1
     mode: beacon
+    jwt: ecb22bc24e7d4061f7ed690ccd5846d7d73f5d2b9733267e12f56790398d908a
+    checkpointSync:
+      enabled: true
+      url: https://beaconstate.ethstaker.cc
     extraArgs:
       - --network=mainnet
       - --execution-endpoint=http://erigon:8551
-      - --execution-jwt=/data/jwt.hex
-      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
       - --http
       - --http-address=0.0.0.0
       - --http-port=5052
