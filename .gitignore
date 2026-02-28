@@ -27,3 +27,7 @@ Properties/launchSettings.json.user
 
 # Private config (hostnames, secrets — never commit)
 .private/
+
+# Bicep compiled ARM output
+infra/*.json
+!infra/main.parameters.json

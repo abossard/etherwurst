@@ -1,0 +1,93 @@
+name: etherwurst
+metadata:
+  template: etherwurst@0.1.0
+infra:
+  provider: bicep
+  path: infra
+  module: main
+  deploymentStacks:
+    actionOnUnmanage:
+      resources: delete
+      resourceGroups: detach
+    denySettings:
+      mode: denyDelete
+      applyToChildScopes: true
+services:
+  app:
+    project: src/HazMeBeenScammed.AppHost
+    host: containerapp
+    language: dotnet
+hooks:
+  preprovision:
+    shell: sh
+    run: |
+      echo "═══ Detecting developer identity..."
+      PRINCIPAL_ID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || true)
+      if [ -n "$PRINCIPAL_ID" ]; then
+        azd env set AZURE_DEVELOPER_PRINCIPAL_ID "$PRINCIPAL_ID"
+        echo "  Developer principal: $PRINCIPAL_ID"
+      else
+        echo "  No interactive user detected — skipping developer RBAC"
+        azd env set AZURE_DEVELOPER_PRINCIPAL_ID ""
+      fi
+      echo "═══ Ensuring resource group exists..."
+      RG_NAME="rg-hazscam-${AZURE_ENV_NAME}"
+      azd env set AZURE_RESOURCE_GROUP "$RG_NAME"
+      az group create --name "$RG_NAME" --location "${AZURE_LOCATION}" -o none 2>/dev/null || true
+      echo "  Resource group: $RG_NAME"
+  postprovision:
+    shell: sh
+    run: |
+      echo "═══ Ensuring Entra ID app registration..."
+      APP_NAME="${AZURE_ENV_NAME}-app"
+      APP_ID=$(az ad app list --display-name "$APP_NAME" --query '[0].appId' -o tsv 2>/dev/null)
+      if [ -z "$APP_ID" ]; then
+        APP_ID=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv)
+        az ad sp create --id "$APP_ID" -o none 2>/dev/null || true
+        echo "  Created app registration: $APP_ID"
+      else
+        echo "  App registration exists: $APP_ID"
+      fi
+      echo "═══ Getting AKS credentials..."
+      az aks get-credentials \
+        -g "${AZURE_RESOURCE_GROUP}" \
+        -n "${AZURE_AKS_CLUSTER_NAME}" \
+        --overwrite-existing
+      echo "═══ Generating VPN client config..."
+      if [ -n "${AZURE_VPN_GATEWAY_NAME}" ]; then
+        VPN_URL=$(az network vnet-gateway vpn-client generate \
+          -g "${AZURE_RESOURCE_GROUP}" \
+          -n "${AZURE_VPN_GATEWAY_NAME}" \
+          -o tsv 2>/dev/null || true)
+        if [ -n "$VPN_URL" ]; then
+          echo "  Download VPN config: $VPN_URL"
+          echo ""
+          echo "  ╔══════════════════════════════════════════════════════════╗"
+          echo "  ║  VPN Setup Instructions:                                ║"
+          echo "  ║  1. Install 'Azure VPN Client' from your app store      ║"
+          echo "  ║     macOS: App Store → 'Azure VPN Client'               ║"
+          echo "  ║     Windows: Microsoft Store → 'Azure VPN Client'       ║"
+          echo "  ║  2. Download the zip from the URL above                 ║"
+          echo "  ║  3. Extract and open AzureVPN/azurevpnconfig.xml        ║"
+          echo "  ║  4. In Azure VPN Client: + → Import → select the xml   ║"
+          echo "  ║  5. Connect — authenticate with your Entra ID           ║"
+          echo "  ║  6. You're now on the VNet (10.0.0.0/16)               ║"
+          echo "  ╚══════════════════════════════════════════════════════════╝"
+        else
+          echo "  VPN Gateway still provisioning — run later:"
+          echo "    az network vnet-gateway vpn-client generate -g ${AZURE_RESOURCE_GROUP} -n ${AZURE_VPN_GATEWAY_NAME} -o tsv"
+        fi
+      else
+        echo "  VPN Gateway not deployed (privateNetworking=false) — skipping"
+      fi
+      echo "═══ Done! 🎉"
+  predown:
+    shell: sh
+    run: |
+      echo "═══ Removing Entra ID app registration..."
+      APP_NAME="${AZURE_ENV_NAME}-app"
+      APP_OBJ=$(az ad app list --display-name "$APP_NAME" --query '[0].id' -o tsv 2>/dev/null)
+      if [ -n "$APP_OBJ" ]; then
+        az ad app delete --id "$APP_OBJ" -o none
+        echo "  Deleted"
+      fi

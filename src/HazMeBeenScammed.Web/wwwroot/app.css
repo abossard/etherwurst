@@ -348,6 +348,12 @@ h1:focus {
         gap: 0.5rem;
     }
 
+    .input-group > .form-control.scam-input {
+        width: 100% !important;
+        min-width: 100%;
+        flex: 0 0 auto;
+    }
+
     .scam-input,
     .btn-analyze {
         border-radius: 10px !important;
