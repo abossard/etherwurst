@@ -53,6 +53,22 @@ hooks:
         -g "${AZURE_RESOURCE_GROUP}" \
         -n "${AZURE_AKS_CLUSTER_NAME}" \
         --overwrite-existing
+      echo "═══ Installing Flux Operator + Web UI..."
+      kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+      helm upgrade --install flux-operator \
+        oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
+        --namespace flux-system \
+        --set webUI.enabled=true \
+        --wait --timeout 5m 2>&1 | tail -3
+      echo "  Flux Operator installed"
+      echo "═══ Applying FluxInstance (GitOps sync)..."
+      kubectl apply -f clusters/etherwurst/flux-system/flux-instance.yaml
+      echo "  FluxInstance applied — Flux will now sync from Git"
+      echo "═══ Waiting for Flux controllers..."
+      for ctrl in source-controller kustomize-controller helm-controller; do
+        kubectl rollout status deployment/"$ctrl" -n flux-system --timeout=120s 2>/dev/null \
+          && echo "  ✓ $ctrl" || echo "  ⚠ $ctrl: not ready yet (will reconcile)"
+      done
       echo "═══ Generating VPN client config..."
       if [ -n "${AZURE_VPN_GATEWAY_NAME}" ]; then
         VPN_URL=$(az network vnet-gateway vpn-client generate \
@@ -81,9 +97,21 @@ hooks:
         echo "  VPN Gateway not deployed (privateNetworking=false) — skipping"
       fi
       echo "═══ Done! 🎉"
+      echo ""
+      echo "  Flux Web UI: kubectl -n flux-system port-forward svc/flux-operator 9080:9080"
+      echo "  Then open:   http://localhost:9080"
   predown:
     shell: sh
     run: |
+      echo "═══ Removing Flux from cluster..."
+      if kubectl get fluxinstances -n flux-system flux &>/dev/null 2>&1; then
+        kubectl delete fluxinstances --all -n flux-system --ignore-not-found 2>/dev/null || true
+        sleep 5
+        helm uninstall flux-operator -n flux-system 2>/dev/null || true
+        echo "  Flux removed"
+      else
+        echo "  Flux not found — skipping"
+      fi
       echo "═══ Removing Entra ID app registration..."
       APP_NAME="${AZURE_ENV_NAME}-app"
       APP_OBJ=$(az ad app list --display-name "$APP_NAME" --query '[0].id' -o tsv 2>/dev/null)

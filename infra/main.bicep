@@ -48,6 +48,8 @@ var vnetName = 'vnet-${dashPrefix}'
 var acrName = 'acr${prefix}'
 var aksClusterName = 'aks-${dashPrefix}'
 var openaiAccountName = 'oai-${dashPrefix}'
+var adxClusterName = 'adx${prefix}'
+var adxDatabaseName = 'ethereum'
 var storageName = 'st${prefix}'
 var vpnPipName = 'pip-${dashPrefix}-vpn'
 var vpnGatewayResourceName = 'vpng-${dashPrefix}'
@@ -584,6 +586,58 @@ resource devOpenAIRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if
   }
 }
 
+// ─── Azure Data Explorer (blockchain analytics) ──────────────────────
+
+resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = {
+  name: adxClusterName
+  location: location
+  sku: {
+    name: 'Dev(No SLA)_Standard_E2a_v4'
+    tier: 'Basic'
+    capacity: 1
+  }
+  identity: { type: 'SystemAssigned' }
+  properties: {
+    enableStreamingIngest: true
+    enableAutoStop: true
+    enableDiskEncryption: true
+    publicNetworkAccess: publicAccess
+  }
+}
+
+resource adxDatabase 'Microsoft.Kusto/clusters/databases@2024-04-13' = {
+  name: adxDatabaseName
+  parent: adxCluster
+  location: location
+  kind: 'ReadWrite'
+  properties: {
+    hotCachePeriod: 'P7D'
+    softDeletePeriod: 'P365D'
+  }
+}
+
+// App identity → ADX Database Ingestor (ETL writes via managed identity)
+resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = {
+  name: 'app-ingestor'
+  parent: adxDatabase
+  properties: {
+    principalId: appIdentity.properties.clientId
+    principalType: 'App'
+    role: 'Ingestor'
+  }
+}
+
+// Developer → ADX Database Admin
+resource devAdxAdmin 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (hasDeveloper) {
+  name: 'dev-admin'
+  parent: adxDatabase
+  properties: {
+    principalId: developerPrincipalId
+    principalType: 'User'
+    role: 'Admin'
+  }
+}
+
 // ─── VPN Gateway (P2S with Entra ID auth) ────────────────────────────
 
 resource vpnPip 'Microsoft.Network/publicIPAddresses@2025-05-01' = if (privateNetworking) {
@@ -644,6 +698,17 @@ resource acrPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetw
   }
 }
 
+resource adxPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetworking) {
+  name: 'pe-${dashPrefix}-adx'
+  location: location
+  properties: {
+    subnet: { id: snetPeId }
+    privateLinkServiceConnections: [
+      { name: 'adx', properties: { privateLinkServiceId: adxCluster.id, groupIds: ['cluster'] } }
+    ]
+  }
+}
+
 // ─── Outputs (azd maps AZURE_ prefixed outputs to env vars) ─────────
 
 output AZURE_AKS_CLUSTER_NAME string = aks.name
@@ -662,3 +727,6 @@ output AZURE_APPLICATIONINSIGHTS_CONNECTION_STRING string = appInsights.properti
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output AZURE_ALB_SUBNET_ID string = snetAlbId
 output AZURE_AGC_WAF_POLICY_ID string = agcWafPolicy.id
+output AZURE_ADX_CLUSTER_URI string = adxCluster.properties.uri
+output AZURE_ADX_CLUSTER_NAME string = adxCluster.name
+output AZURE_ADX_DATABASE_NAME string = adxDatabaseName
