@@ -6,4 +6,4 @@ resources:
   - otterscan.yaml
   - blockscout.yaml
   - hazmebeenscammed.yaml
-  # clickhouse.yaml temporarily removed — will add back after operator installs CRDs
+  - clickhouse.yaml
