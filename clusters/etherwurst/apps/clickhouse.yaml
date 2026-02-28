@@ -10,11 +10,6 @@ spec:
         layout:
           shardsCount: 1
           replicasCount: 1
-    settings:
-      # Performance tuning for analytics workloads
-      max_memory_usage: "10000000000"
-      max_threads: "4"
-      max_query_size: "1073741824"
     users:
       etherwurst/password: "etherwurst-ch-2026"
       etherwurst/networks/ip:
@@ -25,6 +20,8 @@ spec:
     profiles:
       default/max_memory_usage: "10000000000"
       default/max_execution_time: "300"
+      default/max_threads: "4"
+      default/max_query_size: "1073741824"
   defaults:
     templates:
       podTemplate: clickhouse-pod
