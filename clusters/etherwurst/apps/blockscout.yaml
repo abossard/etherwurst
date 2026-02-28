@@ -6,6 +6,14 @@ metadata:
 spec:
   interval: 1h
   timeout: 15m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    cleanupOnFail: true
   chart:
     spec:
       chart: blockscout

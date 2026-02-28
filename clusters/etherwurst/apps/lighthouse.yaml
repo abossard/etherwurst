@@ -1,7 +1,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: erigon
+  name: lighthouse
   namespace: ethereum
 spec:
   interval: 1h
@@ -16,37 +16,35 @@ spec:
     cleanupOnFail: true
   chart:
     spec:
-      chart: erigon
+      chart: lighthouse
       sourceRef:
         kind: HelmRepository
         name: ethereum-helm-charts
         namespace: flux-system
   values:
-    fullnameOverride: erigon
+    fullnameOverride: lighthouse
     image:
-      repository: erigontech/erigon
-      tag: v3.3.8
-    caplin:
-      enabled: false
+      repository: sigp/lighthouse
+      tag: v8.1.1
+    mode: beacon
+    extraArgs:
+      - --network=mainnet
+      - --execution-endpoint=http://erigon:8551
+      - --execution-jwt=/data/jwt.hex
+      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
+      - --http
+      - --http-address=0.0.0.0
+      - --http-port=5052
     persistence:
       enabled: true
       storageClassName: managed-csi-premium
-      size: 2Ti
+      size: 50Gi
       accessModes:
         - ReadWriteOnce
     resources:
       requests:
-        cpu: "2"
-        memory: "16Gi"
-    extraArgs:
-      - --prune.mode=archive
-      - --http.api=eth,net,web3,trace,debug,txpool,erigon,ots
-      - --http.corsdomain=*
-      - --ws.compression
-      - --private.api.addr=0.0.0.0:9090
-      - --db.pagesize=16KB
-    p2pNodePort:
-      enabled: false
+        cpu: "1"
+        memory: "4Gi"
     tolerations:
       - key: ethereum-node
         operator: Equal
