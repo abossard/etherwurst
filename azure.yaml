@@ -103,15 +103,6 @@ hooks:
   predown:
     shell: sh
     run: |
-      echo "═══ Removing Flux from cluster..."
-      if kubectl get fluxinstances -n flux-system flux &>/dev/null 2>&1; then
-        kubectl delete fluxinstances --all -n flux-system --ignore-not-found 2>/dev/null || true
-        sleep 5
-        helm uninstall flux-operator -n flux-system 2>/dev/null || true
-        echo "  Flux removed"
-      else
-        echo "  Flux not found — skipping"
-      fi
       echo "═══ Removing Entra ID app registration..."
       APP_NAME="${AZURE_ENV_NAME}-app"
       APP_OBJ=$(az ad app list --display-name "$APP_NAME" --query '[0].id' -o tsv 2>/dev/null)
