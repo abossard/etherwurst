@@ -39,6 +39,9 @@ spec:
               value: "http://erigon.ethereum.svc.cluster.local:8545"
             - name: Blockscout__ApiUrl
               value: "http://blockscout.blockscout.svc.cluster.local:4000"
+            # ClickHouse analytics DB (uncomment when data is loaded)
+            # - name: ClickHouse__ConnectionString
+            #   value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;User=etherwurst;Password=etherwurst-ch-2026"
           resources:
             requests:
               cpu: 100m

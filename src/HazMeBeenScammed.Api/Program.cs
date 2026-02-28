@@ -10,8 +10,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 // Hexagonal architecture: register ports and adapters
-// Use real Erigon adapter when endpoints are configured, otherwise fall back to fake
+// Priority: ClickHouse (fast analytics) → Erigon (live node) → Fake (dev/demo)
+var clickhouseConn = builder.Configuration["ClickHouse:ConnectionString"];
 var erigonUrl = builder.Configuration["Erigon:RpcUrl"];
+
+// Always register Erigon HTTP clients if configured (used as fallback by ClickHouse adapter)
 if (!string.IsNullOrEmpty(erigonUrl))
 {
     builder.Services.AddHttpClient("erigon-rpc", client =>
@@ -27,7 +30,27 @@ if (!string.IsNullOrEmpty(erigonUrl))
         client.BaseAddress = new Uri(blockscoutUrl);
         client.Timeout = TimeSpan.FromSeconds(15);
     });
+}
 
+if (!string.IsNullOrEmpty(clickhouseConn))
+{
+    // ClickHouse adapter with Erigon as fallback for live-node operations
+    builder.Services.AddSingleton<IBlockchainAnalyticsPort>(sp =>
+    {
+        IBlockchainAnalyticsPort? fallback = !string.IsNullOrEmpty(erigonUrl)
+            ? new ErigonBlockchainAdapter(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ILogger<ErigonBlockchainAdapter>>())
+            : null;
+
+        return new ClickHouseBlockchainAdapter(
+            clickhouseConn,
+            fallback,
+            sp.GetRequiredService<ILogger<ClickHouseBlockchainAdapter>>());
+    });
+}
+else if (!string.IsNullOrEmpty(erigonUrl))
+{
     builder.Services.AddSingleton<IBlockchainAnalyticsPort, ErigonBlockchainAdapter>();
 }
 else
