@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""
+Ethereum ETL: Extract from Erigon JSON-RPC → Load into ClickHouse.
+Runs as a K8s Job or CronJob. Resumes from last checkpoint.
+"""
+import json, os, sys, time, urllib.request, urllib.error
+from datetime import datetime
+
+ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
+CH_HOST = os.environ.get("CLICKHOUSE_HOST", "clickhouse-ethereum-analytics:8123")
+CH_USER = os.environ.get("CLICKHOUSE_USER", "etherwurst")
+CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "etherwurst-ch-2026")
+CH_DB = "ethereum"
+
+# How many blocks to process per run (backfill batch)
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
+# How many blocks per RPC batch call
+RPC_BATCH = 10
+# Maximum blocks to process in one job run
+MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "10000"))
+
+
+def rpc_call(method, params):
+    """Single JSON-RPC call to Erigon."""
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    req = urllib.request.Request(ERIGON_RPC, data=payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        result = json.loads(resp.read())
+    if "error" in result and result["error"]:
+        raise Exception(f"RPC error: {result['error']}")
+    return result.get("result")
+
+
+def ch_query(query, data=None):
+    """Execute a ClickHouse query via HTTP API."""
+    url = f"http://{CH_HOST}/?database={CH_DB}&user={CH_USER}&password={CH_PASS}"
+    if data:
+        payload = (query + "\n" + data).encode()
+    else:
+        payload = query.encode()
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "text/plain"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read().decode().strip()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        raise Exception(f"ClickHouse error {e.code}: {body}")
+
+
+def hex_to_int(h):
+    if not h or h == "0x":
+        return 0
+    return int(h, 16)
+
+
+def get_latest_block():
+    result = rpc_call("eth_blockNumber", [])
+    return hex_to_int(result)
+
+
+def get_last_etl_block():
+    result = ch_query("SELECT max(last_block) FROM etl_progress WHERE dataset = 'transactions' FINAL")
+    return int(result) if result and result != "0" else 0
+
+
+def save_etl_progress(block_num):
+    ch_query(f"INSERT INTO etl_progress (dataset, last_block) VALUES ('transactions', {block_num})")
+
+
+def extract_block(block_num):
+    """Fetch block with full transactions + all receipts."""
+    hex_block = hex(block_num)
+    block = rpc_call("eth_getBlockByNumber", [hex_block, True])
+    if not block:
+        return None, []
+    receipts = rpc_call("eth_getBlockReceipts", [hex_block]) or []
+    return block, receipts
+
+
+def format_block_row(block):
+    ts = hex_to_int(block.get("timestamp", "0x0"))
+    dt = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    return "\t".join([
+        str(hex_to_int(block.get("number", "0x0"))),
+        block.get("hash", ""),
+        block.get("parentHash", ""),
+        dt,
+        (block.get("miner") or "").lower(),
+        str(hex_to_int(block.get("gasUsed", "0x0"))),
+        str(hex_to_int(block.get("gasLimit", "0x0"))),
+        str(hex_to_int(block.get("baseFeePerGas", "0x0"))),
+        str(len(block.get("transactions", []))),
+        str(hex_to_int(block.get("size", "0x0"))),
+    ])
+
+
+def format_tx_row(tx, receipt, block_ts):
+    dt = datetime.utcfromtimestamp(block_ts).strftime("%Y-%m-%d %H:%M:%S")
+    status = hex_to_int(receipt.get("status", "0x0")) if receipt else 0
+    gas_used = hex_to_int(receipt.get("gasUsed", "0x0")) if receipt else 0
+    return "\t".join([
+        str(hex_to_int(tx.get("blockNumber", "0x0"))),
+        dt,
+        str(hex_to_int(tx.get("transactionIndex", "0x0"))),
+        tx.get("hash", ""),
+        (tx.get("from") or "").lower(),
+        (tx.get("to") or "").lower(),
+        str(hex_to_int(tx.get("value", "0x0"))),
+        str(hex_to_int(tx.get("gasPrice", "0x0"))),
+        str(gas_used),
+        tx.get("input", "0x"),
+        str(status),
+        str(hex_to_int(tx.get("type", "0x0"))),
+    ])
+
+
+def format_log_rows(receipt, block_ts):
+    dt = datetime.utcfromtimestamp(block_ts).strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for log in receipt.get("logs", []):
+        topics = log.get("topics", [])
+        rows.append("\t".join([
+            str(hex_to_int(log.get("blockNumber", "0x0"))),
+            dt,
+            log.get("transactionHash", ""),
+            str(hex_to_int(log.get("transactionIndex", "0x0"))),
+            str(hex_to_int(log.get("logIndex", "0x0"))),
+            (log.get("address") or "").lower(),
+            topics[0] if len(topics) > 0 else "",
+            topics[1] if len(topics) > 1 else "",
+            topics[2] if len(topics) > 2 else "",
+            topics[3] if len(topics) > 3 else "",
+            log.get("data", "0x"),
+        ]))
+    return rows
+
+
+def process_batch(start_block, end_block):
+    """Process a range of blocks and insert into ClickHouse."""
+    block_rows = []
+    tx_rows = []
+    log_rows = []
+
+    for bn in range(start_block, end_block + 1):
+        block, receipts = extract_block(bn)
+        if not block:
+            continue
+
+        block_ts = hex_to_int(block.get("timestamp", "0x0"))
+        block_rows.append(format_block_row(block))
+
+        receipt_map = {r["transactionHash"]: r for r in receipts} if receipts else {}
+        for tx in block.get("transactions", []):
+            if isinstance(tx, str):
+                continue  # Skip if only hash (shouldn't happen with True flag)
+            tx_hash = tx.get("hash", "")
+            receipt = receipt_map.get(tx_hash, {})
+            tx_rows.append(format_tx_row(tx, receipt, block_ts))
+            log_rows.extend(format_log_rows(receipt, block_ts))
+
+    # Bulk insert
+    if block_rows:
+        ch_query("INSERT INTO blocks FORMAT TabSeparated", "\n".join(block_rows))
+    if tx_rows:
+        ch_query("INSERT INTO transactions FORMAT TabSeparated", "\n".join(tx_rows))
+    if log_rows:
+        ch_query("INSERT INTO logs FORMAT TabSeparated", "\n".join(log_rows))
+
+    return len(block_rows), len(tx_rows), len(log_rows)
+
+
+def main():
+    print(f"ETL starting | Erigon: {ERIGON_RPC} | ClickHouse: {CH_HOST}")
+
+    latest = get_latest_block()
+    last_etl = get_last_etl_block()
+    print(f"Chain head: {latest} | Last ETL block: {last_etl}")
+
+    if last_etl == 0:
+        # First run: start from recent blocks (last 1000)
+        start = max(latest - 1000, 0)
+        print(f"First run — starting from block {start} (recent {latest - start} blocks)")
+    else:
+        start = last_etl + 1
+
+    if start > latest:
+        print("Already up to date!")
+        return
+
+    end = min(start + MAX_BLOCKS - 1, latest)
+    total_blocks = 0
+    total_txs = 0
+    total_logs = 0
+
+    for batch_start in range(start, end + 1, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE - 1, end)
+        try:
+            nb, nt, nl = process_batch(batch_start, batch_end)
+            total_blocks += nb
+            total_txs += nt
+            total_logs += nl
+            save_etl_progress(batch_end)
+            print(f"  Blocks {batch_start}-{batch_end}: {nb} blocks, {nt} txs, {nl} logs")
+        except Exception as e:
+            print(f"  ERROR at blocks {batch_start}-{batch_end}: {e}", file=sys.stderr)
+            # Save progress up to the failed batch
+            if batch_start > start:
+                save_etl_progress(batch_start - 1)
+            raise
+
+    print(f"ETL complete | {total_blocks} blocks, {total_txs} transactions, {total_logs} logs")
+    print(f"Processed blocks {start} → {end}")
+
+
+if __name__ == "__main__":
+    main()
