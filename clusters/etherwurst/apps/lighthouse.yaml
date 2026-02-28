@@ -26,17 +26,6 @@ spec:
     image:
       repository: sigp/lighthouse
       tag: v8.1.1
-    mode: beacon
-    jwt: ecb22bc24e7d4061f7ed690ccd5846d7d73f5d2b9733267e12f56790398d908a
-    checkpointSync:
-      enabled: true
-      url: https://beaconstate.ethstaker.cc
-    extraArgs:
-      - --network=mainnet
-      - --execution-endpoint=http://erigon:8551
-      - --http
-      - --http-address=0.0.0.0
-      - --http-port=5052
     persistence:
       enabled: true
       storageClassName: managed-csi-premium
@@ -45,8 +34,15 @@ spec:
         - ReadWriteOnce
     resources:
       requests:
-        cpu: "1"
+        cpu: "500m"
         memory: "4Gi"
+    extraArgs:
+      - --execution-endpoint=http://erigon:8551
+    checkpointSync:
+      enabled: true
+      url: "https://beaconstate.ethstaker.cc"
+    p2pNodePort:
+      enabled: false
     tolerations:
       - key: ethereum-node
         operator: Equal
