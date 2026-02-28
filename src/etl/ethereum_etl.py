@@ -59,7 +59,7 @@ def get_latest_block():
 
 
 def get_last_etl_block():
-    result = ch_query("SELECT max(last_block) FROM etl_progress WHERE dataset = 'transactions' FINAL")
+    result = ch_query("SELECT max(last_block) FROM etl_progress FINAL WHERE dataset = 'transactions'")
     return int(result) if result and result != "0" else 0
 
 
