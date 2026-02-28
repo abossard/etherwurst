@@ -10,6 +10,7 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: hazmebeenscammed-api
@@ -87,6 +88,7 @@ metadata:
     app.kubernetes.io/component: web
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: hazmebeenscammed-web
