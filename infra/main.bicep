@@ -534,9 +534,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
 // ─── Azure OpenAI (reasoning models, RBAC-only, no keys) ─────────────
 
 var reasoningModels = [
-  { name: 'o4-mini', model: 'o4-mini', version: '2025-04-16', sku: 'GlobalStandard', capacity: 10 }
-  { name: 'o3-mini', model: 'o3-mini', version: '2025-01-31', sku: 'GlobalStandard', capacity: 10 }
-  { name: 'gpt-4-1', model: 'gpt-4.1', version: '2025-04-14', sku: 'GlobalStandard', capacity: 10 }
+  { name: 'gpt-4o-mini', model: 'gpt-4o-mini', version: '2024-07-18', sku: 'GlobalStandard', capacity: 1 }
 ]
 
 resource openai 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
@@ -593,7 +591,7 @@ resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = {
   name: adxClusterName
   location: location
   sku: {
-    name: 'Dev(No SLA)_Standard_E2a_v4'
+    name: 'Dev(No SLA)_Standard_D11_v2'
     tier: 'Basic'
     capacity: 1
   }
