@@ -8,3 +8,5 @@ resources:
   - hazmebeenscammed.yaml
   - clickhouse.yaml
   - ethereum-etl.yaml
+  - gateway.yaml
+  - cluster-issuer.yaml

@@ -1,0 +1,67 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: etherwurst-gateway
+  namespace: ethereum
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      hostname: checkmyethereum.com
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: checkmyethereum.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: etherwurst-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https-redirect
+  namespace: ethereum
+spec:
+  hostnames:
+    - checkmyethereum.com
+  parentRefs:
+    - name: etherwurst-gateway
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hazmebeenscammed-web
+  namespace: ethereum
+spec:
+  hostnames:
+    - checkmyethereum.com
+  parentRefs:
+    - name: etherwurst-gateway
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: hazmebeenscammed-web
+          port: 80

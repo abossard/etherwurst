@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-gateway
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nginx-gateway-fabric
+  namespace: nginx-gateway
+spec:
+  interval: 1h
+  timeout: 10m
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+  chart:
+    spec:
+      chart: nginx-gateway-fabric
+      sourceRef:
+        kind: HelmRepository
+        name: nginx-gateway
+        namespace: flux-system
+  values:
+    service:
+      type: LoadBalancer

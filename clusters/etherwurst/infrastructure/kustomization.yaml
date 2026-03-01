@@ -7,3 +7,6 @@ resources:
   - default-nodepool.yaml
   - ethereum-nodepool.yaml
   - clickhouse-operator.yaml
+  - nginx-gateway-fabric.yaml
+  - cert-manager.yaml
+  - gateway-api-crds.yaml

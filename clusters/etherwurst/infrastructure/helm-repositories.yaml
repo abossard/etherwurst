@@ -37,3 +37,23 @@ spec:
   type: default
   interval: 1h
   url: https://helm.altinity.com
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: nginx-gateway
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/nginx/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: jetstack
+  namespace: flux-system
+spec:
+  type: default
+  interval: 1h
+  url: https://charts.jetstack.io
