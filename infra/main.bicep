@@ -266,7 +266,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
 resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
   name: aksClusterName
   location: location
-  sku: { name: 'Base', tier: 'Standard' }
+  sku: { name: 'Base', tier: 'Free' }
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: { '${aksIdentity.id}': {} }
@@ -278,12 +278,13 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
     agentPoolProfiles: [
       {
         name: 'system'
-        count: 2
-        vmSize: 'Standard_DS2_v2'
+        count: 1
+        vmSize: 'Standard_B2s'
         mode: 'System'
         osType: 'Linux'
         osSKU: 'AzureLinux'
         vnetSubnetID: snetAksId
+        enableAutoScaling: false
       }
     ]
     networkProfile: {
@@ -533,9 +534,9 @@ resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
 // ─── Azure OpenAI (reasoning models, RBAC-only, no keys) ─────────────
 
 var reasoningModels = [
-  { name: 'o4-mini', model: 'o4-mini', version: '2025-04-16', sku: 'Standard', capacity: 10 }
+  { name: 'o4-mini', model: 'o4-mini', version: '2025-04-16', sku: 'GlobalStandard', capacity: 10 }
   { name: 'o3-mini', model: 'o3-mini', version: '2025-01-31', sku: 'GlobalStandard', capacity: 10 }
-  { name: 'gpt-4-1', model: 'gpt-4.1', version: '2025-04-14', sku: 'Standard', capacity: 10 }
+  { name: 'gpt-4-1', model: 'gpt-4.1', version: '2025-04-14', sku: 'GlobalStandard', capacity: 10 }
 ]
 
 resource openai 'Microsoft.CognitiveServices/accounts@2024-10-01' = {

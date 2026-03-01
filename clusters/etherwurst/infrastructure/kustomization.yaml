@@ -4,5 +4,6 @@ resources:
   - namespaces.yaml
   - storage-classes.yaml
   - helm-repositories.yaml
+  - default-nodepool.yaml
   - ethereum-nodepool.yaml
   - clickhouse-operator.yaml
