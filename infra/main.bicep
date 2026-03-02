@@ -43,7 +43,7 @@ var monitorWorkspaceName = 'mon-${dashPrefix}'
 var appInsightsName = 'appi-${dashPrefix}'
 var dceName = 'dce-${dashPrefix}'
 var dcrPrometheusName = 'dcr-${dashPrefix}-prom'
-var nsgName = 'nsg-${dashPrefix}'
+
 var vnetName = 'vnet-${dashPrefix}'
 var acrName = 'acr${prefix}'
 var aksClusterName = 'aks-${dashPrefix}'
@@ -210,10 +210,6 @@ resource dcrPrometheus 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
 
 // ─── Networking ───────────────────────────────────────────────────────
 
-resource nsg 'Microsoft.Network/networkSecurityGroups@2025-05-01' = {
-  name: nsgName
-  location: location
-}
 
 resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
   name: vnetName
@@ -225,7 +221,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
         name: snetAksName
         properties: {
           addressPrefix: snetAksPrefix
-          networkSecurityGroup: { id: nsg.id }
         }
       }
       {
