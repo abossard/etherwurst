@@ -267,8 +267,12 @@ def main():
     print(f"  Blob:    {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
 
-    # Azure login (workload identity)
-    run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
+    # Azure login (workload identity — specify client ID when multiple identities exist)
+    az_login = ["az", "login", "--identity", "--allow-no-subscriptions"]
+    client_id = os.environ.get("AZURE_CLIENT_ID")
+    if client_id:
+        az_login.extend(["--username", client_id])
+    run(az_login, timeout=60)
 
     chain_head = get_chain_head()
     print(f"  Chain head: {chain_head}")

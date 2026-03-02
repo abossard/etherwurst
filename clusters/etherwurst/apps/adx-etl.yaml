@@ -44,6 +44,7 @@ spec:
           containers:
             - name: etl
               image: ${ACR_LOGIN_SERVER}/adx-etl:latest # {"$imagepolicy": "flux-system:adx-etl"}
+              imagePullPolicy: Always
               env:
                 - name: ERIGON_RPC_URL
                   value: "http://erigon:8545"
