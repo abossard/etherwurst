@@ -166,11 +166,11 @@ def ingest_jsonl(ingest_client, table, jsonl_data, mapping=None):
     """Write JSONL to temp file and ingest into ADX."""
     if not jsonl_data:
         return 0
-    from azure.kusto.ingest import IngestionProperties, DataFormat
+    from azure.kusto.ingest import IngestionProperties
     props = IngestionProperties(
         database=ADX_DATABASE,
         table=table,
-        data_format=DataFormat.MULTIJSON,
+        data_format="multijson",
         ingestion_mapping_reference=mapping,
     )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
