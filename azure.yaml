@@ -89,6 +89,14 @@ hooks:
         --from-literal=AZURE_ENV_NAME="${AZURE_ENV_NAME}" \
         --dry-run=client -o yaml | kubectl apply -f -
       echo "  cluster-config ConfigMap created"
+      echo "═══ Ensuring developer ADX admin assignment..."
+      if [ -n "${AZURE_DEVELOPER_PRINCIPAL_ID}" ] && [ -n "${AZURE_ADX_CLUSTER_NAME}" ]; then
+        ASSIGN_NAME=$(python3 -c "import uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, '${AZURE_ADX_CLUSTER_NAME}/ethereum/${AZURE_DEVELOPER_PRINCIPAL_ID}/Admin'))")
+        az rest --method PUT \
+          --url "https://management.azure.com/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Kusto/clusters/${AZURE_ADX_CLUSTER_NAME}/databases/${AZURE_ADX_DATABASE_NAME}/principalAssignments/${ASSIGN_NAME}?api-version=2024-04-13" \
+          --body "{\"properties\":{\"principalId\":\"${AZURE_DEVELOPER_PRINCIPAL_ID}\",\"principalType\":\"User\",\"role\":\"Admin\"}}" \
+          -o none 2>/dev/null && echo "  ✓ ADX developer admin" || echo "  ⚠ ADX admin assignment (may already exist)"
+      fi
       echo "═══ Waiting for Flux controllers..."
       for ctrl in source-controller kustomize-controller helm-controller; do
         kubectl rollout status deployment/"$ctrl" -n flux-system --timeout=120s 2>/dev/null \

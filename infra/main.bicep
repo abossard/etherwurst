@@ -626,16 +626,8 @@ resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments
   }
 }
 
-// Developer → ADX Database Admin
-resource devAdxAdmin 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (hasDeveloper) {
-  name: 'dev-admin'
-  parent: adxDatabase
-  properties: {
-    principalId: developerPrincipalId
-    principalType: 'User'
-    role: 'Admin'
-  }
-}
+// Developer → ADX Database Admin (handled in postprovision hook to avoid
+// conflicts with pre-existing principal assignments that share the same role+principal)
 
 // ─── VPN Gateway (P2S with Entra ID auth) ────────────────────────────
 
