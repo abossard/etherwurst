@@ -12,11 +12,6 @@ infra:
     denySettings:
       mode: denyDelete
       applyToChildScopes: true
-services:
-  app:
-    project: src/HazMeBeenScammed.AppHost
-    host: containerapp
-    language: dotnet
 hooks:
   preprovision:
     shell: sh
