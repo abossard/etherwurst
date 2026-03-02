@@ -1,37 +1,21 @@
 #!/usr/bin/env python3
 """
 Ethereum ADX ETL: Extract from Erigon via cryo → Parquet → Azure Blob → ADX.
-
-Designed to run as a K8s CronJob on a cost-optimized schedule:
-  1. Start ADX cluster (if stopped)
-  2. Extract new blocks via cryo into Parquet
-  3. Upload Parquet to Azure Blob Storage
-  4. Trigger ADX queued ingestion
-  5. Optionally stop ADX cluster after ingestion
-
-Environment variables:
-  ERIGON_RPC_URL        Erigon JSON-RPC endpoint (default: http://erigon:8545)
-  ADX_CLUSTER_URI       ADX cluster URI (e.g. https://adxetherwurst.westeurope.kusto.windows.net)
-  ADX_DATABASE           ADX database name (default: ethereum)
-  STORAGE_ACCOUNT_NAME  Azure Storage account for staging Parquet files
-  STORAGE_CONTAINER     Blob container name (default: ethereum-etl)
-  MANAGED_IDENTITY_ID   Client ID of the managed identity (for workload identity auth)
-  MAX_BLOCKS            Maximum blocks per run (default: 50000)
-  STOP_ADX_AFTER        Stop ADX cluster after ingestion (default: false)
+Runs as a K8s CronJob. Resumes from last checkpoint stored in ADX.
 """
-import json, os, subprocess, sys, time, urllib.request
+import json, os, subprocess, sys, time, glob as globmod, urllib.request
 
 ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
 ADX_CLUSTER_URI = os.environ["ADX_CLUSTER_URI"]
 ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
 STORAGE_ACCOUNT = os.environ["STORAGE_ACCOUNT_NAME"]
 STORAGE_CONTAINER = os.environ.get("STORAGE_CONTAINER", "ethereum-etl")
+RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
 MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "50000"))
 STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
 
 WORK_DIR = "/tmp/ethereum-extract"
 
-# cryo datasets and their corresponding ADX table names
 DATASETS = {
     "blocks": "Blocks",
     "transactions": "Transactions",
@@ -39,6 +23,15 @@ DATASETS = {
     "traces": "Traces",
 }
 
+def run(cmd, **kwargs):
+    print(f"$ {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.returncode != 0:
+        print(f"STDERR: {result.stderr}", file=sys.stderr)
+        raise Exception(f"Command failed ({result.returncode}): {' '.join(cmd[:3])}")
+    return result
 
 def rpc_call(method, params):
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
@@ -49,35 +42,55 @@ def rpc_call(method, params):
         raise Exception(f"RPC error: {result['error']}")
     return result.get("result")
 
-
 def get_chain_head():
     result = rpc_call("eth_blockNumber", [])
     return int(result, 16) if result else 0
 
+def az_login():
+    """Login to Azure using workload identity (federated token)."""
+    run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
+
+def ensure_adx_running():
+    """Start ADX cluster if it's stopped."""
+    result = subprocess.run(
+        ["az", "kusto", "cluster", "show", "--name", ADX_CLUSTER_URI.split("//")[1].split(".")[0],
+         "--resource-group", RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
+        capture_output=True, text=True, timeout=60
+    )
+    state = result.stdout.strip()
+    print(f"ADX cluster state: {state}")
+    if state == "Stopped":
+        cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+        print("Starting ADX cluster...")
+        run(["az", "kusto", "cluster", "start", "--name", cluster_name,
+             "--resource-group", RESOURCE_GROUP], timeout=600)
+        run(["az", "kusto", "cluster", "wait", "--name", cluster_name,
+             "--resource-group", RESOURCE_GROUP,
+             "--custom", "provisioningState=='Succeeded'"], timeout=600)
+        print("ADX cluster started.")
 
 def get_last_ingested_block():
     """Query ADX for the last ingested block number."""
     try:
+        cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
         result = subprocess.run(
-            ["az", "kusto", "query", "--cluster-name", ADX_CLUSTER_URI,
-             "--database-name", ADX_DATABASE,
+            ["az", "kusto", "query", "--cluster-name", cluster_name,
+             "--database-name", ADX_DATABASE, "--resource-group", RESOURCE_GROUP,
              "--query", "EtlProgress | where dataset == 'cryo' | summarize max(last_block)"],
             capture_output=True, text=True, timeout=60
         )
         if result.returncode == 0 and result.stdout.strip():
             data = json.loads(result.stdout)
             if data and len(data) > 0:
-                val = data[0].get("max_last_block", 0)
+                val = list(data[0].values())[0] if data[0] else 0
                 return int(val) if val else 0
     except Exception as e:
         print(f"Warning: Could not query ADX for progress: {e}")
     return 0
 
-
 def run_cryo(start_block, end_block):
     """Run cryo to extract blockchain data as Parquet files."""
     os.makedirs(WORK_DIR, exist_ok=True)
-
     datasets = list(DATASETS.keys())
     cmd = [
         "cryo", *datasets,
@@ -89,17 +102,16 @@ def run_cryo(start_block, end_block):
         "--max-concurrent-requests", "4",
         "--requests-per-second", "50",
     ]
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    if result.returncode != 0:
-        print(f"cryo stderr: {result.stderr}", file=sys.stderr)
-        raise Exception(f"cryo failed with exit code {result.returncode}")
-    print(f"cryo output: {result.stdout}")
-
+    run(cmd, timeout=7200)
 
 def upload_to_blob():
     """Upload Parquet files to Azure Blob Storage."""
-    cmd = [
+    parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
+    if not parquet_files:
+        print("No Parquet files to upload.")
+        return
+    print(f"Uploading {len(parquet_files)} Parquet files to blob...")
+    run([
         "az", "storage", "blob", "upload-batch",
         "--destination", STORAGE_CONTAINER,
         "--source", WORK_DIR,
@@ -107,26 +119,14 @@ def upload_to_blob():
         "--auth-mode", "login",
         "--overwrite",
         "--pattern", "*.parquet",
-    ]
-    print(f"Uploading to blob: {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-    if result.returncode != 0:
-        print(f"Upload stderr: {result.stderr}", file=sys.stderr)
-        raise Exception(f"Blob upload failed with exit code {result.returncode}")
-    print(f"Upload complete: {result.stdout}")
-
+    ], timeout=1800)
 
 def ingest_to_adx():
-    """Trigger ADX queued ingestion for uploaded Parquet files.
-
-    Uses the Kusto Python SDK if available, otherwise falls back to
-    .ingest commands via az kusto query.
-    """
+    """Trigger ADX queued ingestion from blob."""
     try:
-        from azure.kusto.data import KustoConnectionStringBuilder
-        from azure.kusto.ingest import QueuedIngestClient, IngestionProperties
-        from azure.kusto.ingest import DataFormat
         from azure.identity import DefaultAzureCredential
+        from azure.kusto.data import KustoConnectionStringBuilder
+        from azure.kusto.ingest import QueuedIngestClient, IngestionProperties, DataFormat
 
         ingest_uri = ADX_CLUSTER_URI.replace("https://", "https://ingest-")
         credential = DefaultAzureCredential()
@@ -141,70 +141,54 @@ def ingest_to_adx():
                 table=table,
                 data_format=DataFormat.PARQUET,
             )
-            # List parquet files for this dataset and ingest each
-            list_cmd = [
-                "az", "storage", "blob", "list",
-                "--container-name", STORAGE_CONTAINER,
-                "--account-name", STORAGE_ACCOUNT,
-                "--auth-mode", "login",
-                "--prefix", dataset,
-                "--query", "[].name",
-                "-o", "json",
-            ]
-            list_result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=60)
-            if list_result.returncode == 0:
-                blobs = json.loads(list_result.stdout)
-                for blob_name in blobs:
-                    if blob_name.endswith(".parquet"):
-                        blob_url = f"{blob_base}/{blob_name}"
-                        print(f"  Ingesting {blob_name} → {table}")
-                        client.ingest_from_blob(blob_url, ingestion_properties=props)
+            parquet_files = globmod.glob(f"{WORK_DIR}/{dataset}*/**/*.parquet", recursive=True)
+            if not parquet_files:
+                parquet_files = globmod.glob(f"{WORK_DIR}/*{dataset}*.parquet")
+            for f in parquet_files:
+                rel_path = os.path.relpath(f, WORK_DIR)
+                blob_url = f"{blob_base}/{rel_path}"
+                print(f"  Ingesting {rel_path} → {table}")
+                client.ingest_from_blob(blob_url, ingestion_properties=props)
 
-        print("ADX ingestion queued successfully (SDK)")
+        print("ADX ingestion queued (SDK)")
         return
     except ImportError:
-        print("Kusto SDK not available, falling back to az CLI ingestion")
-
-    # Fallback: use .ingest inline commands via az kusto query
-    blob_base = f"https://{STORAGE_ACCOUNT}.blob.core.windows.net/{STORAGE_CONTAINER}"
-    for dataset, table in DATASETS.items():
-        query = f".ingest into table {table} (h@'{blob_base}/{dataset}/') with (format='parquet')"
-        cmd = [
-            "az", "kusto", "query",
-            "--cluster-name", ADX_CLUSTER_URI,
-            "--database-name", ADX_DATABASE,
-            "--query", query,
-        ]
-        print(f"  Ingesting {dataset}/ → {table}")
-        subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-    print("ADX ingestion triggered (CLI fallback)")
-
+        print("Kusto SDK not available, skipping SDK ingestion")
+    except Exception as e:
+        print(f"SDK ingestion error: {e}", file=sys.stderr)
 
 def update_progress(block_num):
     """Record ETL progress in ADX."""
-    query = f".ingest inline into table EtlProgress <| cryo,{block_num},{time.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    ts = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+    query = f".ingest inline into table EtlProgress <| cryo,{block_num},{ts}"
     subprocess.run(
-        ["az", "kusto", "query", "--cluster-name", ADX_CLUSTER_URI,
-         "--database-name", ADX_DATABASE, "--query", query],
+        ["az", "kusto", "query", "--cluster-name", cluster_name,
+         "--database-name", ADX_DATABASE, "--resource-group", RESOURCE_GROUP,
+         "--query", query],
         capture_output=True, text=True, timeout=60
     )
 
-
 def cleanup():
-    """Remove temporary Parquet files."""
     subprocess.run(["rm", "-rf", WORK_DIR], capture_output=True)
 
-
 def main():
-    print(f"ADX ETL starting | Erigon: {ERIGON_RPC} | ADX: {ADX_CLUSTER_URI}")
+    print(f"═══ ADX ETL starting ═══")
+    print(f"  Erigon: {ERIGON_RPC}")
+    print(f"  ADX:    {ADX_CLUSTER_URI}")
+    print(f"  Blob:   {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
+
+    az_login()
 
     chain_head = get_chain_head()
+    print(f"Chain head: {chain_head}")
+
+    ensure_adx_running()
+
     last_block = get_last_ingested_block()
-    print(f"Chain head: {chain_head} | Last ingested: {last_block}")
+    print(f"Last ingested block: {last_block}")
 
     if last_block == 0:
-        # First run: start from recent blocks
         start = max(chain_head - 10000, 0)
         print(f"First run — starting from block {start}")
     else:
@@ -222,20 +206,18 @@ def main():
         upload_to_blob()
         ingest_to_adx()
         update_progress(end)
-        print(f"ETL complete: blocks {start} → {end}")
+        print(f"═══ ETL complete: blocks {start} → {end} ═══")
     finally:
         cleanup()
 
     if STOP_ADX_AFTER:
+        cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
         print("Stopping ADX cluster to save costs...")
         subprocess.run(
-            ["az", "kusto", "cluster", "stop",
-             "--name", ADX_CLUSTER_URI.split("//")[1].split(".")[0],
-             "--resource-group", os.environ.get("AZURE_RESOURCE_GROUP", ""),
-             "--no-wait"],
+            ["az", "kusto", "cluster", "stop", "--name", cluster_name,
+             "--resource-group", RESOURCE_GROUP, "--no-wait"],
             capture_output=True, text=True
         )
-
 
 if __name__ == "__main__":
     main()

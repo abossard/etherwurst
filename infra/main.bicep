@@ -291,6 +291,12 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
       serviceCidr: serviceCidr
       dnsServiceIP: dnsServiceIP
       loadBalancerSku: 'standard'
+      advancedNetworking: {
+        enabled: true
+        observability: {
+          enabled: true
+        }
+      }
     }
     addonProfiles: {
       omsagent: {
@@ -376,6 +382,17 @@ resource appFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
   properties: {
     issuer: aks.properties.oidcIssuerProfile.issuerURL
     subject: 'system:serviceaccount:default:${projectName}-sa'
+    audiences: [workloadIdentityAudience]
+  }
+}
+
+// ADX ETL → federated credential (CronJob in ethereum namespace)
+resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
+  name: 'adx-etl-workload-identity'
+  parent: appIdentity
+  properties: {
+    issuer: aks.properties.oidcIssuerProfile.issuerURL
+    subject: 'system:serviceaccount:ethereum:adx-etl-sa'
     audiences: [workloadIdentityAudience]
   }
 }

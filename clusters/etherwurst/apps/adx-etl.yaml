@@ -1,13 +1,15 @@
-# ─── ADX ETL CronJob ──────────────────────────────────────────────────────────
-# Extracts blockchain data from Erigon via cryo → Parquet → Blob → ADX.
-# Runs daily at 02:00 UTC to minimize costs (ADX auto-stops when idle).
-#
-# Prerequisites:
-#   - cryo binary in the container image (or install at runtime)
-#   - Azure CLI authenticated via workload identity
-#   - ADX cluster and schema deployed (see src/etl/adx-schema.kql)
-#   - Storage container 'ethereum-etl' created in the storage account
-# ──────────────────────────────────────────────────────────────────────────────
+# ─── ADX ETL: Workload Identity ServiceAccount ───────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: adx-etl-sa
+  namespace: ethereum
+  annotations:
+    azure.workload.identity/client-id: "${AZURE_APP_IDENTITY_CLIENT_ID}"
+  labels:
+    azure.workload.identity/use: "true"
+---
+# ─── ADX ETL Script (ConfigMap) ──────────────────────────────────────────────
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,19 +17,244 @@ metadata:
   namespace: ethereum
 data:
   adx_etl.py: |
-    # Mounted from ConfigMap — see src/etl/adx_etl.py for the full source.
-    # The actual script is baked into the container image; this ConfigMap
-    # is kept for quick iteration without rebuilding images.
+    #!/usr/bin/env python3
+    """
+    Ethereum ADX ETL: Extract from Erigon via cryo → Parquet → Azure Blob → ADX.
+    Runs as a K8s CronJob. Resumes from last checkpoint stored in ADX.
+    """
+    import json, os, subprocess, sys, time, glob as globmod, urllib.request
+
+    ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
+    ADX_CLUSTER_URI = os.environ["ADX_CLUSTER_URI"]
+    ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
+    STORAGE_ACCOUNT = os.environ["STORAGE_ACCOUNT_NAME"]
+    STORAGE_CONTAINER = os.environ.get("STORAGE_CONTAINER", "ethereum-etl")
+    RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
+    MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "50000"))
+    STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
+
+    WORK_DIR = "/tmp/ethereum-extract"
+
+    DATASETS = {
+        "blocks": "Blocks",
+        "transactions": "Transactions",
+        "logs": "Logs",
+        "traces": "Traces",
+    }
+
+    def run(cmd, **kwargs):
+        print(f"$ {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+        if result.stdout.strip():
+            print(result.stdout.strip())
+        if result.returncode != 0:
+            print(f"STDERR: {result.stderr}", file=sys.stderr)
+            raise Exception(f"Command failed ({result.returncode}): {' '.join(cmd[:3])}")
+        return result
+
+    def rpc_call(method, params):
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+        req = urllib.request.Request(ERIGON_RPC, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        if "error" in result and result["error"]:
+            raise Exception(f"RPC error: {result['error']}")
+        return result.get("result")
+
+    def get_chain_head():
+        result = rpc_call("eth_blockNumber", [])
+        return int(result, 16) if result else 0
+
+    def az_login():
+        """Login to Azure using workload identity (federated token)."""
+        run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
+
+    def ensure_adx_running():
+        """Start ADX cluster if it's stopped."""
+        result = subprocess.run(
+            ["az", "kusto", "cluster", "show", "--name", ADX_CLUSTER_URI.split("//")[1].split(".")[0],
+             "--resource-group", RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
+            capture_output=True, text=True, timeout=60
+        )
+        state = result.stdout.strip()
+        print(f"ADX cluster state: {state}")
+        if state == "Stopped":
+            cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+            print("Starting ADX cluster...")
+            run(["az", "kusto", "cluster", "start", "--name", cluster_name,
+                 "--resource-group", RESOURCE_GROUP], timeout=600)
+            run(["az", "kusto", "cluster", "wait", "--name", cluster_name,
+                 "--resource-group", RESOURCE_GROUP,
+                 "--custom", "provisioningState=='Succeeded'"], timeout=600)
+            print("ADX cluster started.")
+
+    def get_last_ingested_block():
+        """Query ADX for the last ingested block number."""
+        try:
+            cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+            result = subprocess.run(
+                ["az", "kusto", "query", "--cluster-name", cluster_name,
+                 "--database-name", ADX_DATABASE, "--resource-group", RESOURCE_GROUP,
+                 "--query", "EtlProgress | where dataset == 'cryo' | summarize max(last_block)"],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                data = json.loads(result.stdout)
+                if data and len(data) > 0:
+                    val = list(data[0].values())[0] if data[0] else 0
+                    return int(val) if val else 0
+        except Exception as e:
+            print(f"Warning: Could not query ADX for progress: {e}")
+        return 0
+
+    def run_cryo(start_block, end_block):
+        """Run cryo to extract blockchain data as Parquet files."""
+        os.makedirs(WORK_DIR, exist_ok=True)
+        datasets = list(DATASETS.keys())
+        cmd = [
+            "cryo", *datasets,
+            "-b", f"{start_block}:{end_block}",
+            "--rpc", ERIGON_RPC,
+            "-o", WORK_DIR,
+            "--output-format", "parquet",
+            "--chunk-size", "1000",
+            "--max-concurrent-requests", "4",
+            "--requests-per-second", "50",
+        ]
+        run(cmd, timeout=7200)
+
+    def upload_to_blob():
+        """Upload Parquet files to Azure Blob Storage."""
+        parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
+        if not parquet_files:
+            print("No Parquet files to upload.")
+            return
+        print(f"Uploading {len(parquet_files)} Parquet files to blob...")
+        run([
+            "az", "storage", "blob", "upload-batch",
+            "--destination", STORAGE_CONTAINER,
+            "--source", WORK_DIR,
+            "--account-name", STORAGE_ACCOUNT,
+            "--auth-mode", "login",
+            "--overwrite",
+            "--pattern", "*.parquet",
+        ], timeout=1800)
+
+    def ingest_to_adx():
+        """Trigger ADX queued ingestion from blob."""
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.kusto.data import KustoConnectionStringBuilder
+            from azure.kusto.ingest import QueuedIngestClient, IngestionProperties, DataFormat
+
+            ingest_uri = ADX_CLUSTER_URI.replace("https://", "https://ingest-")
+            credential = DefaultAzureCredential()
+            kcsb = KustoConnectionStringBuilder.with_azure_token_credential(ingest_uri, credential)
+            client = QueuedIngestClient(kcsb)
+
+            blob_base = f"https://{STORAGE_ACCOUNT}.blob.core.windows.net/{STORAGE_CONTAINER}"
+
+            for dataset, table in DATASETS.items():
+                props = IngestionProperties(
+                    database=ADX_DATABASE,
+                    table=table,
+                    data_format=DataFormat.PARQUET,
+                )
+                parquet_files = globmod.glob(f"{WORK_DIR}/{dataset}*/**/*.parquet", recursive=True)
+                if not parquet_files:
+                    parquet_files = globmod.glob(f"{WORK_DIR}/*{dataset}*.parquet")
+                for f in parquet_files:
+                    rel_path = os.path.relpath(f, WORK_DIR)
+                    blob_url = f"{blob_base}/{rel_path}"
+                    print(f"  Ingesting {rel_path} → {table}")
+                    client.ingest_from_blob(blob_url, ingestion_properties=props)
+
+            print("ADX ingestion queued (SDK)")
+            return
+        except ImportError:
+            print("Kusto SDK not available, skipping SDK ingestion")
+        except Exception as e:
+            print(f"SDK ingestion error: {e}", file=sys.stderr)
+
+    def update_progress(block_num):
+        """Record ETL progress in ADX."""
+        ts = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+        cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+        query = f".ingest inline into table EtlProgress <| cryo,{block_num},{ts}"
+        subprocess.run(
+            ["az", "kusto", "query", "--cluster-name", cluster_name,
+             "--database-name", ADX_DATABASE, "--resource-group", RESOURCE_GROUP,
+             "--query", query],
+            capture_output=True, text=True, timeout=60
+        )
+
+    def cleanup():
+        subprocess.run(["rm", "-rf", WORK_DIR], capture_output=True)
+
+    def main():
+        print(f"═══ ADX ETL starting ═══")
+        print(f"  Erigon: {ERIGON_RPC}")
+        print(f"  ADX:    {ADX_CLUSTER_URI}")
+        print(f"  Blob:   {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
+
+        az_login()
+
+        chain_head = get_chain_head()
+        print(f"Chain head: {chain_head}")
+
+        ensure_adx_running()
+
+        last_block = get_last_ingested_block()
+        print(f"Last ingested block: {last_block}")
+
+        if last_block == 0:
+            start = max(chain_head - 10000, 0)
+            print(f"First run — starting from block {start}")
+        else:
+            start = last_block + 1
+
+        if start > chain_head:
+            print("Already up to date!")
+            return
+
+        end = min(start + MAX_BLOCKS - 1, chain_head)
+        print(f"Extracting blocks {start} → {end} ({end - start + 1} blocks)")
+
+        try:
+            run_cryo(start, end)
+            upload_to_blob()
+            ingest_to_adx()
+            update_progress(end)
+            print(f"═══ ETL complete: blocks {start} → {end} ═══")
+        finally:
+            cleanup()
+
+        if STOP_ADX_AFTER:
+            cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+            print("Stopping ADX cluster to save costs...")
+            subprocess.run(
+                ["az", "kusto", "cluster", "stop", "--name", cluster_name,
+                 "--resource-group", RESOURCE_GROUP, "--no-wait"],
+                capture_output=True, text=True
+            )
+
+    if __name__ == "__main__":
+        main()
 ---
+# ─── ADX ETL CronJob ─────────────────────────────────────────────────────────
+# Extracts blockchain data from Erigon via cryo → Parquet → Blob → ADX.
+# Runs daily at 02:00 UTC. ADX auto-stops when idle to minimize cost.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: adx-etl-sync
   namespace: ethereum
   labels:
-    app: adx-etl
+    app.kubernetes.io/name: adx-etl
+    app.kubernetes.io/part-of: etherwurst
+    app.kubernetes.io/component: etl
 spec:
-  schedule: "0 2 * * *"  # Daily at 02:00 UTC
+  schedule: "0 2 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -38,28 +265,30 @@ spec:
       template:
         metadata:
           labels:
-            app: adx-etl
+            app.kubernetes.io/name: adx-etl
             azure.workload.identity/use: "true"
         spec:
-          serviceAccountName: etherwurst-app  # Workload identity SA
+          serviceAccountName: adx-etl-sa
           restartPolicy: OnFailure
           initContainers:
-            # Install cryo binary (until we have a custom image)
             - name: install-cryo
-              image: rust:1.83-slim
+              image: alpine:3.21
               command:
                 - /bin/sh
                 - -c
                 - |
-                  apt-get update -qq && apt-get install -y -qq curl
-                  curl -L https://github.com/paradigmxyz/cryo/releases/latest/download/cryo-x86_64-unknown-linux-gnu.tar.gz \
+                  set -e
+                  apk add --no-cache curl
+                  curl -sSfL https://github.com/paradigmxyz/cryo/releases/latest/download/cryo-x86_64-unknown-linux-gnu.tar.gz \
                     | tar xz -C /shared/bin/
+                  chmod +x /shared/bin/cryo
+                  /shared/bin/cryo --version
               volumeMounts:
                 - name: shared-bin
                   mountPath: /shared/bin
               resources:
-                requests: { cpu: 100m, memory: 256Mi }
-                limits: { cpu: 500m, memory: 512Mi }
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 256Mi }
           containers:
             - name: etl
               image: python:3.12-slim
@@ -67,28 +296,25 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  # Install Azure CLI + Kusto SDK
-                  pip install -q azure-cli azure-kusto-data azure-kusto-ingest azure-identity
+                  set -e
+                  pip install --quiet --no-cache-dir \
+                    azure-cli \
+                    azure-kusto-data \
+                    azure-kusto-ingest \
+                    azure-identity
                   export PATH="/shared/bin:$PATH"
                   python3 /scripts/adx_etl.py
               env:
                 - name: ERIGON_RPC_URL
                   value: "http://erigon:8545"
                 - name: ADX_CLUSTER_URI
-                  valueFrom:
-                    configMapKeyRef:
-                      name: cluster-config
-                      key: AZURE_ADX_CLUSTER_URI
+                  value: "${AZURE_ADX_CLUSTER_URI}"
                 - name: ADX_DATABASE
-                  valueFrom:
-                    configMapKeyRef:
-                      name: cluster-config
-                      key: AZURE_ADX_DATABASE_NAME
+                  value: "${AZURE_ADX_DATABASE_NAME}"
                 - name: STORAGE_ACCOUNT_NAME
-                  valueFrom:
-                    configMapKeyRef:
-                      name: cluster-config
-                      key: AZURE_STORAGE_ACCOUNT_NAME
+                  value: "${AZURE_STORAGE_ACCOUNT_NAME}"
+                - name: AZURE_RESOURCE_GROUP
+                  value: "${AZURE_RESOURCE_GROUP}"
                 - name: STORAGE_CONTAINER
                   value: "ethereum-etl"
                 - name: MAX_BLOCKS
