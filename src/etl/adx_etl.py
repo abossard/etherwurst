@@ -161,27 +161,26 @@ def update_progress(client, block_num):
 # ── Step 1: Extract with cryo ────────────────────────────────────────────────
 
 def run_cryo(start_block, end_block):
+    """Extract each dataset sequentially to limit memory usage."""
     os.makedirs(WORK_DIR, exist_ok=True)
-    cmd = [
-        "cryo",
-        *list(DATASETS.keys()),
-        "-b", f"{start_block}:{end_block}",
-        "--rpc", ERIGON_RPC,
-        "-o", WORK_DIR,
-        "--output-format", "parquet",
-        "--compression", "snappy",
-        "--chunk-size", CRYO_CHUNK_SIZE,
-        "--max-concurrent-requests", CRYO_CONCURRENCY,
-        "--requests-per-second", CRYO_RPS,
-    ]
     t0 = time.time()
-    run(cmd, timeout=7200)
+    for dataset in DATASETS.keys():
+        print(f"  cryo: extracting {dataset}...")
+        cmd = [
+            "cryo", dataset,
+            "-b", f"{start_block}:{end_block}",
+            "--rpc", ERIGON_RPC,
+            "-o", WORK_DIR,
+            "--chunk-size", CRYO_CHUNK_SIZE,
+            "--max-concurrent-requests", CRYO_CONCURRENCY,
+            "--requests-per-second", CRYO_RPS,
+        ]
+        run(cmd, timeout=7200)
     elapsed = time.time() - t0
     n_blocks = end_block - start_block + 1
     bps = n_blocks / elapsed if elapsed > 0 else 0
     print(f"  cryo: {n_blocks} blocks in {elapsed:.0f}s ({bps:.0f} blocks/sec)")
 
-    # Count output files
     parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
     total_bytes = sum(os.path.getsize(f) for f in parquet_files)
     print(f"  Output: {len(parquet_files)} Parquet files, {total_bytes / (1024*1024):.1f} MB total")
@@ -267,12 +266,20 @@ def main():
     print(f"  Blob:    {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
 
-    # Azure login (workload identity — specify client ID when multiple identities exist)
-    az_login = ["az", "login", "--identity", "--allow-no-subscriptions"]
-    client_id = os.environ.get("AZURE_CLIENT_ID")
-    if client_id:
-        az_login.extend(["--username", client_id])
-    run(az_login, timeout=60)
+    # Azure CLI login (workload identity uses federated token, not managed identity)
+    client_id = os.environ.get("AZURE_CLIENT_ID", "")
+    tenant_id = os.environ.get("AZURE_TENANT_ID", "")
+    token_file = os.environ.get("AZURE_FEDERATED_TOKEN_FILE", "")
+    if client_id and tenant_id and token_file:
+        with open(token_file) as f:
+            token = f.read().strip()
+        run(["az", "login", "--service-principal",
+             "-u", client_id, "-t", tenant_id,
+             "--federated-token", token,
+             "--allow-no-subscriptions"], timeout=60)
+    else:
+        # Fallback: managed identity (local dev / non-workload-identity)
+        run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
 
     chain_head = get_chain_head()
     print(f"  Chain head: {chain_head}")
