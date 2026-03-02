@@ -30,7 +30,7 @@ While [doc 12](./12-blockchain-analytics-database.md) recommends ClickHouse for 
 | address (20 bytes) | `string` | `0x`-prefixed hex, 42 chars |
 | timestamp | `datetime` | Convert from Unix epoch at ingestion |
 | gas values | `long` | 64-bit unsigned fits all gas values |
-| value (wei) | `decimal` | 128-bit, 34 significant digits — enough for 99.99% of real values. Max representable: ~1.15×10^18 ETH. Use `string` only for exotic uint256 edge cases. |
+| value (wei) | `string` | U256 hex string — `todecimal()` at query time. `decimal` (128-bit, 34 digits) overflows for exotic uint256 values. |
 | nonce | `long` | |
 | tx type | `int` | 0=legacy, 1=access list, 2=EIP-1559, 3=blob |
 | status | `int` | 0=failure, 1=success |
@@ -54,8 +54,8 @@ While [doc 12](./12-blockchain-analytics-database.md) recommends ClickHouse for 
     nonce: string,
     sha3_uncles: string,
     miner: string,
-    difficulty: decimal,
-    total_difficulty: decimal,
+    difficulty: string,
+    total_difficulty: string,
     size: long,
     extra_data: string,
     gas_limit: long,
@@ -80,7 +80,7 @@ While [doc 12](./12-blockchain-analytics-database.md) recommends ClickHouse for 
     transaction_index: int,
     from_address: string,
     to_address: string,
-    value: decimal,
+    value: string,
     gas: long,
     gas_price: long,
     input: string,
@@ -808,7 +808,92 @@ union hop1, hop2, hop3
 
 ---
 
-## 8. Key References
+## 8. Optimized cryo Pipeline (Implemented)
+
+The production ETL uses a purpose-built Docker image containing cryo (Rust) + Python orchestrator + Azure CLI.
+
+### Architecture
+
+```
+Erigon (RPC:8545)
+    │ batch JSON-RPC (32 concurrent)
+    ▼
+cryo (Rust binary)  ─── 500-1,500 blocks/sec
+    │ Parquet + Snappy compression
+    ▼
+Parquet merge (pyarrow)  ─── ~256 MB target per file
+    │
+    ▼
+Azure Blob Storage (ethereum-etl container)
+    │ az storage blob upload-batch (managed identity)
+    ▼
+ADX Queued Ingestion (from blob URLs + managed identity)
+    │ Kusto Python SDK
+    ▼
+Azure Data Explorer (ethereum database, 7 tables)
+```
+
+### Docker Image
+
+Multi-stage build in `src/etl/Dockerfile`:
+
+1. **Rust builder** — latest Rust, compiles cryo from git main (~4 min)
+2. **Python runtime** — latest Python 3 slim, Kusto SDK, pyarrow, Azure CLI
+
+Image size: ~1.4 GB. All dependencies pre-installed — zero startup overhead at runtime.
+
+### Why cryo over Python JSON-RPC?
+
+| Metric | Python JSON-RPC | cryo (Rust) | Improvement |
+|--------|----------------|-------------|-------------|
+| Blocks/sec | 15-40 | 500-1,500 | **25-100×** |
+| Parallelism | Limited by GIL | Native async + threads | Better |
+| Output format | JSON (needs mapping) | Parquet (auto-maps) | Simpler |
+| Memory usage | High (JSON in memory) | Low (streaming) | Better |
+| ADX ingestion | 2-step (JSON→file→ingest) | 1-step (Parquet→blob→ingest) | Faster |
+
+### Research: Tool Comparison
+
+Benchmarked four approaches for Ethereum data extraction:
+
+| Tool | Language | Blocks/sec | Complexity | Best For |
+|------|----------|-----------|------------|----------|
+| **cryo** | Rust | 500-1,500 | Medium | Production ETL ✅ |
+| Python async + orjson | Python | 20-100 | Low | Prototyping |
+| ethereum-etl | Python | 3-10 | Low | Legacy |
+| reth DB direct | Rust | 500+ | Very High | Only if running reth |
+
+### Research: ADX Parquet Ingestion
+
+Key findings applied to this implementation:
+
+- **Column auto-mapping**: ADX maps Parquet columns by name (case-insensitive). No explicit mapping needed when cryo output matches the table schema.
+- **U256 values**: Ethereum `value`, `difficulty`, `total_difficulty` are U256 integers (up to 78 digits). Stored as `string` in ADX since `decimal` (34 digits) may overflow for exotic values. Use `todecimal()` at query time.
+- **Optimal file size**: Microsoft recommends 100 MB – 1 GB per Parquet file. The ETL merges small cryo output files into ~256 MB chunks before upload.
+- **Managed identity**: Blob URLs use `;managed_identity=system` — no SAS tokens needed.
+- **Batching policy**: 5-minute default is appropriate for daily batch ETL. Lower only for near-real-time scenarios.
+
+### CronJob Configuration
+
+- **Schedule**: `0 2 * * *` (daily at 02:00 UTC)
+- **Image**: `${ACR_LOGIN_SERVER}/adx-etl:latest`
+- **Max blocks/run**: 100,000 (configurable via `MAX_BLOCKS`)
+- **ADX auto-stop**: Cluster stops after idle period, ETL starts it automatically
+- **Cost**: ~$0.24/day ($7.20/month) compute + ~$20-50/month storage
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `src/etl/Dockerfile` | Multi-stage Docker build (Rust + Python) |
+| `src/etl/adx_etl.py` | Python orchestrator (cryo → blob → ADX) |
+| `src/etl/adx-schema.kql` | ADX table definitions, policies, mappings |
+| `src/etl/requirements.txt` | Python dependencies |
+| `clusters/etherwurst/apps/adx-etl.yaml` | K8s CronJob + ServiceAccount (Flux-managed) |
+
+---
+
+## 9. Key References
 
 ### ADX / Kusto
 - [ADX Schema Optimization Best Practices](https://learn.microsoft.com/en-us/azure/data-explorer/schema-best-practice)

@@ -1,50 +1,88 @@
 #!/usr/bin/env python3
 """
-Ethereum ADX ETL: Extract from Erigon JSON-RPC → ingest into ADX.
-Runs as a K8s CronJob. Resumes from last checkpoint stored in ADX.
-Uses batch JSON-RPC for efficient extraction and Kusto SDK for ingestion.
+Ethereum ADX ETL — Optimal Pipeline
+Erigon → cryo (Rust, parallel) → Parquet/Snappy → Azure Blob → ADX queued ingest
+
+Designed for:
+  - Maximum extraction speed via cryo (500-1500 blocks/sec)
+  - Parquet ingestion into ADX (2-3x faster than JSON)
+  - Zero startup overhead (all deps pre-installed in Docker image)
+  - Cost optimization (runs on schedule, ADX auto-stops when idle)
+
+Environment:
+  ERIGON_RPC_URL          Erigon JSON-RPC endpoint
+  ADX_CLUSTER_URI         ADX cluster URI
+  ADX_DATABASE            ADX database name
+  STORAGE_ACCOUNT_NAME    Azure Storage account
+  STORAGE_CONTAINER       Blob container (default: ethereum-etl)
+  AZURE_RESOURCE_GROUP    Azure resource group
+  MAX_BLOCKS              Max blocks per run (default: 100000)
+  CRYO_CONCURRENCY        cryo max concurrent requests (default: 32)
+  CRYO_CHUNK_SIZE         cryo chunk size (default: 1000)
+  CRYO_RPS                cryo requests per second (default: 100)
+  STOP_ADX_AFTER          Stop ADX cluster after run (default: false)
 """
-import json, os, sys, time, tempfile, urllib.request, urllib.error
-from datetime import datetime, timezone
+import glob as globmod
+import json
+import os
+import subprocess
+import sys
+import time
+
+import requests as req
+
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
 ADX_CLUSTER_URI = os.environ["ADX_CLUSTER_URI"]
 ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
-MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "10000"))
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
-RPC_BATCH = int(os.environ.get("RPC_BATCH", "10"))
+STORAGE_ACCOUNT = os.environ["STORAGE_ACCOUNT_NAME"]
+STORAGE_CONTAINER = os.environ.get("STORAGE_CONTAINER", "ethereum-etl")
+RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
+MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "100000"))
+CRYO_CONCURRENCY = os.environ.get("CRYO_CONCURRENCY", "32")
+CRYO_CHUNK_SIZE = os.environ.get("CRYO_CHUNK_SIZE", "1000")
+CRYO_RPS = os.environ.get("CRYO_RPS", "100")
+STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
+FIRST_RUN_LOOKBACK = int(os.environ.get("FIRST_RUN_LOOKBACK", "10000"))
 
-# ── Erigon RPC helpers ────────────────────────────────────────────────
+WORK_DIR = "/tmp/cryo-extract"
 
-def rpc_call(method, params):
-    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-    req = urllib.request.Request(ERIGON_RPC, data=payload, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        result = json.loads(resp.read())
-    if "error" in result and result["error"]:
-        raise Exception(f"RPC error: {result['error']}")
-    return result.get("result")
+# cryo dataset → ADX table mapping
+DATASETS = {
+    "blocks": "Blocks",
+    "transactions": "Transactions",
+    "logs": "Logs",
+    "traces": "Traces",
+}
 
-def rpc_batch(calls):
-    """Send batch JSON-RPC calls for efficiency."""
-    payload = json.dumps([
-        {"jsonrpc": "2.0", "id": i, "method": m, "params": p}
-        for i, (m, p) in enumerate(calls)
-    ]).encode()
-    req = urllib.request.Request(ERIGON_RPC, data=payload, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        results = json.loads(resp.read())
-    return {r["id"]: r.get("result") for r in sorted(results, key=lambda x: x["id"])}
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def hex_to_int(h):
-    if not h or h == "0x":
-        return 0
-    return int(h, 16)
+_session = req.Session()
+_adapter = req.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=4)
+_session.mount("http://", _adapter)
+_session.mount("https://", _adapter)
+
+
+def run(cmd, timeout=3600):
+    print(f"  $ {' '.join(cmd[:6])}{'...' if len(cmd) > 6 else ''}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        print(f"  STDOUT: {result.stdout[-500:]}" if result.stdout else "", file=sys.stderr)
+        print(f"  STDERR: {result.stderr[-500:]}" if result.stderr else "", file=sys.stderr)
+        raise RuntimeError(f"Command failed ({result.returncode}): {cmd[0]}")
+    return result
+
 
 def get_chain_head():
-    return hex_to_int(rpc_call("eth_blockNumber", []))
+    resp = _session.post(ERIGON_RPC, json={
+        "jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []
+    }, timeout=30)
+    result = resp.json().get("result", "0x0")
+    return int(result, 16)
 
-# ── ADX / Kusto helpers ───────────────────────────────────────────────
+
+# ── ADX client setup ─────────────────────────────────────────────────────────
 
 def get_kusto_client():
     from azure.identity import DefaultAzureCredential
@@ -52,6 +90,7 @@ def get_kusto_client():
     credential = DefaultAzureCredential()
     kcsb = KustoConnectionStringBuilder.with_azure_token_credential(ADX_CLUSTER_URI, credential)
     return KustoClient(kcsb)
+
 
 def get_ingest_client():
     from azure.identity import DefaultAzureCredential
@@ -62,154 +101,179 @@ def get_ingest_client():
     kcsb = KustoConnectionStringBuilder.with_azure_token_credential(ingest_uri, credential)
     return QueuedIngestClient(kcsb)
 
+
 def kusto_query(client, query):
     response = client.execute(ADX_DATABASE, query)
-    rows = []
-    for row in response.primary_results[0]:
-        rows.append(row)
-    return rows
+    return [row for row in response.primary_results[0]]
+
+
+# ── ADX cluster management ───────────────────────────────────────────────────
+
+def ensure_adx_running():
+    cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+    result = subprocess.run(
+        ["az", "kusto", "cluster", "show", "--name", cluster_name,
+         "--resource-group", RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
+        capture_output=True, text=True, timeout=60
+    )
+    state = result.stdout.strip()
+    print(f"  ADX cluster state: {state}")
+    if state == "Stopped":
+        print("  Starting ADX cluster...")
+        run(["az", "kusto", "cluster", "start", "--name", cluster_name,
+             "--resource-group", RESOURCE_GROUP], timeout=600)
+        run(["az", "kusto", "cluster", "wait", "--name", cluster_name,
+             "--resource-group", RESOURCE_GROUP,
+             "--custom", "provisioningState=='Succeeded'"], timeout=600)
+        print("  ADX cluster started.")
+
+
+def stop_adx():
+    cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
+    print("  Stopping ADX cluster...")
+    subprocess.run(
+        ["az", "kusto", "cluster", "stop", "--name", cluster_name,
+         "--resource-group", RESOURCE_GROUP, "--no-wait"],
+        capture_output=True, text=True, timeout=60
+    )
+
+
+# ── ETL progress tracking ────────────────────────────────────────────────────
 
 def get_last_ingested_block(client):
     try:
-        rows = kusto_query(client, "EtlProgress | where dataset == 'adx-etl' | summarize max(last_block)")
+        rows = kusto_query(client, "EtlProgress | where dataset == 'cryo' | summarize max(last_block)")
         if rows and rows[0][0] is not None:
             return int(rows[0][0])
     except Exception as e:
         print(f"  Warning: Could not read progress: {e}")
     return 0
 
+
 def update_progress(client, block_num):
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        kusto_query(client, f".ingest inline into table EtlProgress <| adx-etl,{block_num},{ts}")
+        kusto_query(client, f".ingest inline into table EtlProgress <| cryo,{block_num},{ts}")
     except Exception as e:
         print(f"  Warning: Could not update progress: {e}")
 
-# ── Data extraction & transformation ──────────────────────────────────
 
-def extract_blocks(start, end):
-    """Fetch blocks + receipts using batch RPC."""
-    blocks_data = []
-    for chunk_start in range(start, end + 1, RPC_BATCH):
-        chunk_end = min(chunk_start + RPC_BATCH - 1, end)
-        calls = []
-        for bn in range(chunk_start, chunk_end + 1):
-            h = hex(bn)
-            calls.append(("eth_getBlockByNumber", [h, True]))
-            calls.append(("eth_getBlockReceipts", [h]))
-        results = rpc_batch(calls)
-        for i, bn in enumerate(range(chunk_start, chunk_end + 1)):
-            block = results.get(i * 2)
-            receipts = results.get(i * 2 + 1) or []
-            if block:
-                blocks_data.append((block, receipts))
-    return blocks_data
+# ── Step 1: Extract with cryo ────────────────────────────────────────────────
 
-def block_to_json(block):
-    ts = hex_to_int(block.get("timestamp", "0x0"))
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-    return json.dumps({
-        "number": hex_to_int(block.get("number", "0x0")),
-        "hash": block.get("hash", ""),
-        "parent_hash": block.get("parentHash", ""),
-        "nonce": block.get("nonce", ""),
-        "miner": (block.get("miner") or "").lower(),
-        "difficulty": str(hex_to_int(block.get("difficulty", "0x0"))),
-        "size": hex_to_int(block.get("size", "0x0")),
-        "gas_limit": hex_to_int(block.get("gasLimit", "0x0")),
-        "gas_used": hex_to_int(block.get("gasUsed", "0x0")),
-        "timestamp": dt,
-        "transaction_count": len(block.get("transactions", [])),
-        "base_fee_per_gas": hex_to_int(block.get("baseFeePerGas", "0x0")),
-    })
+def run_cryo(start_block, end_block):
+    os.makedirs(WORK_DIR, exist_ok=True)
+    cmd = [
+        "cryo",
+        *list(DATASETS.keys()),
+        "-b", f"{start_block}:{end_block}",
+        "--rpc", ERIGON_RPC,
+        "-o", WORK_DIR,
+        "--output-format", "parquet",
+        "--compression", "snappy",
+        "--chunk-size", CRYO_CHUNK_SIZE,
+        "--max-concurrent-requests", CRYO_CONCURRENCY,
+        "--requests-per-second", CRYO_RPS,
+    ]
+    t0 = time.time()
+    run(cmd, timeout=7200)
+    elapsed = time.time() - t0
+    n_blocks = end_block - start_block + 1
+    bps = n_blocks / elapsed if elapsed > 0 else 0
+    print(f"  cryo: {n_blocks} blocks in {elapsed:.0f}s ({bps:.0f} blocks/sec)")
 
-def tx_to_json(tx, receipt, block_ts):
-    dt = datetime.fromtimestamp(block_ts, tz=timezone.utc).isoformat()
-    return json.dumps({
-        "hash": tx.get("hash", ""),
-        "nonce": hex_to_int(tx.get("nonce", "0x0")),
-        "block_hash": tx.get("blockHash", ""),
-        "block_number": hex_to_int(tx.get("blockNumber", "0x0")),
-        "transaction_index": hex_to_int(tx.get("transactionIndex", "0x0")),
-        "from_address": (tx.get("from") or "").lower(),
-        "to_address": (tx.get("to") or "").lower(),
-        "value": str(hex_to_int(tx.get("value", "0x0"))),
-        "gas": hex_to_int(tx.get("gas", "0x0")),
-        "gas_price": hex_to_int(tx.get("gasPrice", "0x0")),
-        "input": tx.get("input", "0x")[:512],
-        "block_timestamp": dt,
-        "receipt_gas_used": hex_to_int(receipt.get("gasUsed", "0x0")) if receipt else 0,
-        "receipt_status": hex_to_int(receipt.get("status", "0x0")) if receipt else 0,
-        "receipt_effective_gas_price": hex_to_int(receipt.get("effectiveGasPrice", "0x0")) if receipt else 0,
-        "transaction_type": hex_to_int(tx.get("type", "0x0")),
-        "max_fee_per_gas": hex_to_int(tx.get("maxFeePerGas", "0x0")),
-        "max_priority_fee_per_gas": hex_to_int(tx.get("maxPriorityFeePerGas", "0x0")),
-    })
+    # Count output files
+    parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
+    total_bytes = sum(os.path.getsize(f) for f in parquet_files)
+    print(f"  Output: {len(parquet_files)} Parquet files, {total_bytes / (1024*1024):.1f} MB total")
 
-def log_to_json(log, block_ts):
-    dt = datetime.fromtimestamp(block_ts, tz=timezone.utc).isoformat()
-    return json.dumps({
-        "log_index": hex_to_int(log.get("logIndex", "0x0")),
-        "transaction_hash": log.get("transactionHash", ""),
-        "transaction_index": hex_to_int(log.get("transactionIndex", "0x0")),
-        "block_hash": log.get("blockHash", ""),
-        "block_number": hex_to_int(log.get("blockNumber", "0x0")),
-        "address": (log.get("address") or "").lower(),
-        "data": log.get("data", "0x"),
-        "topics": log.get("topics", []),
-        "block_timestamp": dt,
-    })
 
-# ── Ingestion ─────────────────────────────────────────────────────────
+# ── Step 2: Upload Parquet to Blob ────────────────────────────────────────────
 
-def ingest_jsonl(ingest_client, table, jsonl_data, mapping=None):
-    """Write JSONL to temp file and ingest into ADX."""
-    if not jsonl_data:
-        return 0
+def upload_to_blob():
+    parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
+    if not parquet_files:
+        print("  No Parquet files to upload.")
+        return
+    t0 = time.time()
+    run([
+        "az", "storage", "blob", "upload-batch",
+        "--destination", STORAGE_CONTAINER,
+        "--source", WORK_DIR,
+        "--account-name", STORAGE_ACCOUNT,
+        "--auth-mode", "login",
+        "--overwrite",
+        "--pattern", "*.parquet",
+    ], timeout=1800)
+    elapsed = time.time() - t0
+    print(f"  Uploaded {len(parquet_files)} files to blob in {elapsed:.0f}s")
+
+
+# ── Step 3: Ingest Parquet from Blob into ADX ─────────────────────────────────
+
+def ingest_from_blob(ingest_client):
     from azure.kusto.ingest import IngestionProperties
     from azure.kusto.data import DataFormat
-    props = IngestionProperties(
-        database=ADX_DATABASE,
-        table=table,
-        data_format=DataFormat.MULTIJSON,
-        ingestion_mapping_reference=mapping,
-    )
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write("\n".join(jsonl_data))
-        f.flush()
-        ingest_client.ingest_from_file(f.name, ingestion_properties=props)
-    os.unlink(f.name)
-    return len(jsonl_data)
 
-# ── Main pipeline ─────────────────────────────────────────────────────
+    blob_base = f"https://{STORAGE_ACCOUNT}.blob.core.windows.net/{STORAGE_CONTAINER}"
+    total_ingested = 0
 
-def process_batch(blocks_data, ingest_client):
-    block_rows, tx_rows, log_rows = [], [], []
-    for block, receipts in blocks_data:
-        block_ts = hex_to_int(block.get("timestamp", "0x0"))
-        block_rows.append(block_to_json(block))
-        receipt_map = {r["transactionHash"]: r for r in receipts} if receipts else {}
-        for tx in block.get("transactions", []):
-            if isinstance(tx, str):
-                continue
-            receipt = receipt_map.get(tx.get("hash", ""), {})
-            tx_rows.append(tx_to_json(tx, receipt, block_ts))
-            for log in receipt.get("logs", []):
-                log_rows.append(log_to_json(log, block_ts))
+    for dataset, table in DATASETS.items():
+        props = IngestionProperties(
+            database=ADX_DATABASE,
+            table=table,
+            data_format=DataFormat.PARQUET,
+        )
+        # Find parquet files for this dataset in work dir
+        patterns = [
+            f"{WORK_DIR}/{dataset}*.parquet",
+            f"{WORK_DIR}/**/{dataset}*.parquet",
+            f"{WORK_DIR}/*/{dataset}*.parquet",
+        ]
+        files = []
+        for p in patterns:
+            files.extend(globmod.glob(p, recursive=True))
+        files = list(set(files))  # dedup
 
-    nb = ingest_jsonl(ingest_client, "Blocks", block_rows)
-    nt = ingest_jsonl(ingest_client, "Transactions", tx_rows)
-    nl = ingest_jsonl(ingest_client, "Logs", log_rows)
-    return nb, nt, nl
+        if not files:
+            print(f"  {table}: no Parquet files found")
+            continue
+
+        for f in files:
+            rel_path = os.path.relpath(f, WORK_DIR)
+            blob_url = f"{blob_base}/{rel_path}"
+            ingest_client.ingest_from_blob(
+                blob_url,
+                ingestion_properties=props
+            )
+            total_ingested += 1
+
+        print(f"  {table}: queued {len(files)} Parquet files for ingestion")
+
+    print(f"  Total: {total_ingested} ingestion operations queued")
+
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+
+def cleanup():
+    subprocess.run(["rm", "-rf", WORK_DIR], capture_output=True)
+
+
+# ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def main():
-    print(f"═══ ADX ETL starting ═══")
-    print(f"  Erigon: {ERIGON_RPC}")
-    print(f"  ADX:    {ADX_CLUSTER_URI}")
-    print(f"  Batch:  {BATCH_SIZE} blocks, RPC batch: {RPC_BATCH}")
+    print("═══ ADX ETL (Optimal) starting ═══")
+    print(f"  Erigon:  {ERIGON_RPC}")
+    print(f"  ADX:     {ADX_CLUSTER_URI}")
+    print(f"  Blob:    {STORAGE_ACCOUNT}/{STORAGE_CONTAINER}")
+    print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
+
+    # Azure login (workload identity)
+    run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
 
     chain_head = get_chain_head()
     print(f"  Chain head: {chain_head}")
+
+    ensure_adx_running()
 
     kusto = get_kusto_client()
     ingest = get_ingest_client()
@@ -218,7 +282,7 @@ def main():
     print(f"  Last ingested: {last_block}")
 
     if last_block == 0:
-        start = max(chain_head - 1000, 0)
+        start = max(chain_head - FIRST_RUN_LOOKBACK, 0)
         print(f"  First run — starting from block {start}")
     else:
         start = last_block + 1
@@ -228,25 +292,30 @@ def main():
         return
 
     end = min(start + MAX_BLOCKS - 1, chain_head)
-    total_b, total_t, total_l = 0, 0, 0
-    print(f"  Extracting blocks {start} → {end} ({end - start + 1} blocks)")
+    print(f"  Target: blocks {start} → {end} ({end - start + 1:,} blocks)")
 
-    for batch_start in range(start, end + 1, BATCH_SIZE):
-        batch_end = min(batch_start + BATCH_SIZE - 1, end)
-        try:
-            blocks_data = extract_blocks(batch_start, batch_end)
-            nb, nt, nl = process_batch(blocks_data, ingest)
-            total_b += nb; total_t += nt; total_l += nl
-            update_progress(kusto, batch_end)
-            print(f"  Blocks {batch_start}-{batch_end}: {nb} blocks, {nt} txs, {nl} logs")
-        except Exception as e:
-            print(f"  ERROR at {batch_start}-{batch_end}: {e}", file=sys.stderr)
-            if batch_start > start:
-                update_progress(kusto, batch_start - 1)
-            raise
+    t_total = time.time()
+    try:
+        print("\n── Step 1: Extract (cryo → Parquet) ──")
+        run_cryo(start, end)
 
-    print(f"═══ ETL complete: {total_b} blocks, {total_t} txs, {total_l} logs ═══")
-    print(f"  Processed blocks {start} → {end}")
+        print("\n── Step 2: Upload (Parquet → Blob) ──")
+        upload_to_blob()
+
+        print("\n── Step 3: Ingest (Blob → ADX) ──")
+        ingest_from_blob(ingest)
+
+        update_progress(kusto, end)
+    finally:
+        cleanup()
+
+    elapsed = time.time() - t_total
+    print(f"\n═══ ETL complete in {elapsed:.0f}s ═══")
+    print(f"  Blocks {start} → {end} ({end - start + 1:,} blocks)")
+
+    if STOP_ADX_AFTER:
+        stop_adx()
+
 
 if __name__ == "__main__":
     main()

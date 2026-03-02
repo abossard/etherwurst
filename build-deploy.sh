@@ -21,11 +21,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${SCRIPT_DIR}/src"
 MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/hazmebeenscammed.yaml"
+ETL_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/adx-etl.yaml"
 
 ACR_NAME="k8sdemoanbo"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 API_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-api"
 WEB_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-web"
+ETL_IMAGE="${ACR_LOGIN_SERVER}/adx-etl"
 NAMESPACE="ethereum"
 IMAGE_TAG="${IMAGE_TAG:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 
@@ -58,9 +60,9 @@ done
 build_local() {
   log "Logging into ACR..."
   az acr login --name "$ACR_NAME" --output none
-  log "Building API + Web in parallel (linux/amd64)..."
-  local start_time=$SECONDS api_log web_log
-  api_log=$(mktemp); web_log=$(mktemp)
+  log "Building API + Web + ETL in parallel (linux/amd64)..."
+  local start_time=$SECONDS api_log web_log etl_log
+  api_log=$(mktemp); web_log=$(mktemp); etl_log=$(mktemp)
 
   ( docker buildx build --platform linux/amd64 --provenance=false \
       --tag "${API_IMAGE}:${IMAGE_TAG}" --tag "${API_IMAGE}:latest" \
@@ -74,14 +76,21 @@ build_local() {
       > "$web_log" 2>&1 && echo "OK" >> "$web_log" ) &
   local web_pid=$!
 
+  ( docker buildx build --platform linux/amd64 --provenance=false \
+      --tag "${ETL_IMAGE}:${IMAGE_TAG}" --tag "${ETL_IMAGE}:latest" \
+      --file "${SRC_DIR}/etl/Dockerfile" --push "${SCRIPT_DIR}" \
+      > "$etl_log" 2>&1 && echo "OK" >> "$etl_log" ) &
+  local etl_pid=$!
+
   local failed=false
   wait "$api_pid" || { err "API build failed:"; cat "$api_log"; failed=true; }
   wait "$web_pid" || { err "Web build failed:"; cat "$web_log"; failed=true; }
-  rm -f "$api_log" "$web_log"
+  wait "$etl_pid" || { err "ETL build failed:"; cat "$etl_log"; failed=true; }
+  rm -f "$api_log" "$web_log" "$etl_log"
 
   local elapsed=$(( SECONDS - start_time ))
   $failed && { err "Build failed after ${elapsed}s"; exit 1; }
-  ok "Built & pushed in ${elapsed}s: ${API_IMAGE}:${IMAGE_TAG}, ${WEB_IMAGE}:${IMAGE_TAG}"
+  ok "Built & pushed in ${elapsed}s: ${API_IMAGE}:${IMAGE_TAG}, ${WEB_IMAGE}:${IMAGE_TAG}, ${ETL_IMAGE}:${IMAGE_TAG}"
 }
 
 # ─── Build: ACR Tasks (cloud fallback) ───────────────────────────────
@@ -97,6 +106,12 @@ build_acr() {
     --image "hazmebeenscammed-web:${IMAGE_TAG}" --image "hazmebeenscammed-web:latest" \
     --file "${SRC_DIR}/HazMeBeenScammed.Web/Dockerfile" "${SRC_DIR}"
   ok "Web: ${WEB_IMAGE}:${IMAGE_TAG}"
+
+  log "Building ETL via ACR Tasks..."
+  az acr build --registry "$ACR_NAME" \
+    --image "adx-etl:${IMAGE_TAG}" --image "adx-etl:latest" \
+    --file "${SRC_DIR}/etl/Dockerfile" "${SCRIPT_DIR}"
+  ok "ETL: ${ETL_IMAGE}:${IMAGE_TAG}"
 }
 
 # ─── Build dispatch ──────────────────────────────────────────────────
@@ -111,18 +126,21 @@ build() {
 
 # ─── Update manifest + git push ──────────────────────────────────────
 deploy() {
-  log "Updating manifest to ${IMAGE_TAG}..."
+  log "Updating manifests to ${IMAGE_TAG}..."
   sed -i.bak -E \
     "s|(hazmebeenscammed-api:)[^ ]+( #)|\1${IMAGE_TAG}\2|g; \
      s|(hazmebeenscammed-web:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$MANIFEST"
   rm -f "${MANIFEST}.bak"
+  sed -i.bak -E \
+    "s|(adx-etl:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$ETL_MANIFEST"
+  rm -f "${ETL_MANIFEST}.bak"
 
-  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST"; then
-    ok "Manifest already at ${IMAGE_TAG}"
+  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST" "$ETL_MANIFEST"; then
+    ok "Manifests already at ${IMAGE_TAG}"
     return
   fi
 
-  git -C "$SCRIPT_DIR" add "$MANIFEST"
+  git -C "$SCRIPT_DIR" add "$MANIFEST" "$ETL_MANIFEST"
   git -C "$SCRIPT_DIR" commit -m "deploy: update images to ${IMAGE_TAG}
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
@@ -139,6 +157,7 @@ show_status() {
   for d in hazmebeenscammed-api hazmebeenscammed-web; do
     echo "  ${d}: $(kubectl get deploy "$d" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
   done
+  echo "  adx-etl: $(kubectl get cronjob adx-etl-sync -n "$NAMESPACE" -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
   echo ""
   log "Manifest:"
   grep 'hazmebeenscammed-' "$MANIFEST" | grep image | sed 's/^/  /'
