@@ -30,3 +30,5 @@ spec:
   values:
     installCRDs: true
     featureGates: ExperimentalGatewayAPISupport=true
+    config:
+      enableGatewayAPI: true
