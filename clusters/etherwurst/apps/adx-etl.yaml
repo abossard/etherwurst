@@ -61,11 +61,11 @@ spec:
                 - name: MAX_BLOCKS
                   value: "100000"
                 - name: CRYO_CONCURRENCY
-                  value: "32"
+                  value: "8"
                 - name: CRYO_CHUNK_SIZE
-                  value: "10000"
+                  value: "2000"
                 - name: CRYO_RPS
-                  value: "100"
+                  value: "50"
                 - name: STOP_ADX_AFTER
                   value: "false"
                 - name: FIRST_RUN_LOOKBACK

@@ -48,12 +48,11 @@ FIRST_RUN_LOOKBACK = int(os.environ.get("FIRST_RUN_LOOKBACK", "10000"))
 
 WORK_DIR = "/tmp/cryo-extract"
 
-# cryo dataset → ADX table mapping
+# cryo dataset → ADX table mapping (traces skipped: too memory-intensive for small nodes)
 DATASETS = {
     "blocks": "Blocks",
     "transactions": "Transactions",
     "logs": "Logs",
-    "traces": "Traces",
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

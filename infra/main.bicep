@@ -22,6 +22,9 @@ param vpnClientAddressPool string = '172.16.0.0/24'
 @description('Give the deploying developer full RBAC access (AKS admin, Storage admin, ACR push)')
 param isDeveloper bool = true
 
+@description('Enable Advanced Container Networking Services (Hubble observability + FQDN policies, ~$18/node/month)')
+param enableACNS bool = false
+
 @description('Object ID of the developer principal — auto-set by azd preprovision hook')
 param developerPrincipalId string = ''
 
@@ -292,9 +295,9 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
       dnsServiceIP: dnsServiceIP
       loadBalancerSku: 'standard'
       advancedNetworking: {
-        enabled: true
+        enabled: enableACNS
         observability: {
-          enabled: true
+          enabled: enableACNS
         }
       }
     }
@@ -324,6 +327,9 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
       webAppRouting: { enabled: false }
     }
     serviceMeshProfile: { mode: 'Disabled' }
+    workloadAutoScalerProfile: {
+      verticalPodAutoscaler: { enabled: true }
+    }
   }
 }
 
@@ -554,16 +560,7 @@ resource etlContainer 'Microsoft.Storage/storageAccounts/blobServices/containers
   properties: { publicAccess: 'None' }
 }
 
-// App identity → Storage Blob Data Contributor (ETL uploads Parquet files)
-resource appStorageBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, appIdentity.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
-  scope: storage
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
-    principalId: appIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// Note: Storage Blob Data Contributor for appIdentity is assigned above as appIdentityStorageRole
 
 // ─── Azure OpenAI (reasoning models, RBAC-only, no keys) ─────────────
 
@@ -660,8 +657,31 @@ resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments
   }
 }
 
+// App identity → ADX Database Viewer (ETL reads progress, queries tables)
+resource appAdxViewer 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = {
+  name: 'app-viewer'
+  parent: adxDatabase
+  properties: {
+    principalId: appIdentity.properties.clientId
+    principalType: 'App'
+    role: 'Viewer'
+  }
+}
+
 // Developer → ADX Database Admin (handled in postprovision hook to avoid
 // conflicts with pre-existing principal assignments that share the same role+principal)
+
+// ─── ADX Schema (applied idempotently via .create-merge) ─────────────
+
+resource adxSchema 'Microsoft.Kusto/clusters/databases/scripts@2024-04-13' = {
+  name: 'ethereum-schema'
+  parent: adxDatabase
+  properties: {
+    continueOnErrors: true
+    forceUpdateTag: 'v2-cryo-string-types'
+    scriptContent: loadTextContent('../src/etl/adx-schema.kql')
+  }
+}
 
 // ─── VPN Gateway (P2S with Entra ID auth) ────────────────────────────
 

@@ -23,7 +23,7 @@ SRC_DIR="${SCRIPT_DIR}/src"
 MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/hazmebeenscammed.yaml"
 ETL_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/adx-etl.yaml"
 
-ACR_NAME="k8sdemoanbo"
+ACR_NAME="${ACR_NAME:-$(cd "$SCRIPT_DIR" && azd env get-value AZURE_CONTAINER_REGISTRY_NAME 2>/dev/null || echo 'acrhazscamr3is7')}"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 API_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-api"
 WEB_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-web"
