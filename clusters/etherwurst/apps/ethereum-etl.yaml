@@ -47,6 +47,30 @@ data:
             return 0
         return int(h, 16)
 
+    def ensure_schema():
+        """Create tables if they don't exist (idempotent)."""
+        ch_query("CREATE DATABASE IF NOT EXISTS ethereum")
+        ch_query("""CREATE TABLE IF NOT EXISTS blocks (
+            number UInt64, hash String, parent_hash String, timestamp DateTime,
+            miner String, gas_used UInt64, gas_limit UInt64, base_fee UInt64,
+            tx_count UInt32, size UInt32
+        ) ENGINE = ReplacingMergeTree() ORDER BY number""")
+        ch_query("""CREATE TABLE IF NOT EXISTS transactions (
+            block_number UInt64, block_timestamp DateTime, tx_index UInt32,
+            hash String, from_addr String, to_addr String, value UInt256,
+            gas_price UInt256, gas_used UInt64, input String, status UInt8,
+            tx_type UInt8
+        ) ENGINE = ReplacingMergeTree() ORDER BY (block_number, tx_index)""")
+        ch_query("""CREATE TABLE IF NOT EXISTS logs (
+            block_number UInt64, block_timestamp DateTime, tx_hash String,
+            tx_index UInt32, log_index UInt32, address String,
+            topic0 String, topic1 String, topic2 String, topic3 String,
+            data String
+        ) ENGINE = ReplacingMergeTree() ORDER BY (block_number, tx_index, log_index)""")
+        ch_query("""CREATE TABLE IF NOT EXISTS etl_progress (
+            dataset String, last_block UInt64
+        ) ENGINE = ReplacingMergeTree() ORDER BY dataset""")
+
     def get_latest_block():
         return hex_to_int(rpc_call("eth_blockNumber", []))
 
@@ -146,6 +170,7 @@ data:
 
     def main():
         print(f"ETL starting | Erigon: {ERIGON_RPC} | ClickHouse: {CH_HOST}")
+        ensure_schema()
         latest = get_latest_block()
         last_etl = get_last_etl_block()
         print(f"Chain head: {latest} | Last ETL block: {last_etl}")
