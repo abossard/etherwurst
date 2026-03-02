@@ -55,6 +55,9 @@ hooks:
         --overwrite-existing
       echo "═══ Installing Flux Operator + Web UI..."
       kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
+      echo "═══ Installing Gateway API CRDs..."
+      kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml 2>/dev/null
+      echo "  Gateway API CRDs installed"
       helm upgrade --install flux-operator \
         oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
         --namespace flux-system \
@@ -64,6 +67,28 @@ hooks:
       echo "═══ Applying FluxInstance (GitOps sync)..."
       kubectl apply -f clusters/etherwurst/flux-system/flux-instance.yaml
       echo "  FluxInstance applied — Flux will now sync from Git"
+      echo "═══ Creating cluster-config ConfigMap from azd outputs..."
+      kubectl create configmap cluster-config \
+        --namespace flux-system \
+        --from-literal=ACR_LOGIN_SERVER="${AZURE_CONTAINER_REGISTRY_LOGIN_SERVER}" \
+        --from-literal=AZURE_CONTAINER_REGISTRY_NAME="${AZURE_CONTAINER_REGISTRY_NAME}" \
+        --from-literal=AZURE_OPENAI_ENDPOINT="${AZURE_OPENAI_ENDPOINT}" \
+        --from-literal=AZURE_OPENAI_ACCOUNT_NAME="${AZURE_OPENAI_ACCOUNT_NAME}" \
+        --from-literal=AZURE_APP_IDENTITY_CLIENT_ID="${AZURE_APP_IDENTITY_CLIENT_ID}" \
+        --from-literal=AZURE_APP_IDENTITY_NAME="${AZURE_APP_IDENTITY_NAME}" \
+        --from-literal=AZURE_ALB_IDENTITY_CLIENT_ID="${AZURE_ALB_IDENTITY_CLIENT_ID}" \
+        --from-literal=AZURE_STORAGE_ACCOUNT_NAME="${AZURE_STORAGE_ACCOUNT_NAME}" \
+        --from-literal=AZURE_APPLICATIONINSIGHTS_CONNECTION_STRING="${AZURE_APPLICATIONINSIGHTS_CONNECTION_STRING}" \
+        --from-literal=AZURE_RESOURCE_GROUP="${AZURE_RESOURCE_GROUP}" \
+        --from-literal=AZURE_ALB_SUBNET_ID="${AZURE_ALB_SUBNET_ID}" \
+        --from-literal=AZURE_AGC_WAF_POLICY_ID="${AZURE_AGC_WAF_POLICY_ID}" \
+        --from-literal=AZURE_ADX_CLUSTER_URI="${AZURE_ADX_CLUSTER_URI}" \
+        --from-literal=AZURE_ADX_CLUSTER_NAME="${AZURE_ADX_CLUSTER_NAME}" \
+        --from-literal=AZURE_ADX_DATABASE_NAME="${AZURE_ADX_DATABASE_NAME}" \
+        --from-literal=AZURE_AKS_CLUSTER_NAME="${AZURE_AKS_CLUSTER_NAME}" \
+        --from-literal=AZURE_ENV_NAME="${AZURE_ENV_NAME}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+      echo "  cluster-config ConfigMap created"
       echo "═══ Waiting for Flux controllers..."
       for ctrl in source-controller kustomize-controller helm-controller; do
         kubectl rollout status deployment/"$ctrl" -n flux-system --timeout=120s 2>/dev/null \

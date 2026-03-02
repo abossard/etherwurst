@@ -13,5 +13,9 @@ spec:
   path: clusters/etherwurst/apps
   prune: true
   wait: false
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-config
   dependsOn:
     - name: flux-system
