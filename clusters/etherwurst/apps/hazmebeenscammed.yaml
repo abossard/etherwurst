@@ -21,8 +21,6 @@ spec:
         app.kubernetes.io/part-of: hazmebeenscammed
         app.kubernetes.io/component: api
     spec:
-      nodeSelector:
-        kubernetes.azure.com/nodepool-type: VirtualMachineScaleSets
       containers:
         - name: api
           image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:11588ff # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
@@ -102,8 +100,6 @@ spec:
         app.kubernetes.io/part-of: hazmebeenscammed
         app.kubernetes.io/component: web
     spec:
-      nodeSelector:
-        kubernetes.azure.com/nodepool-type: VirtualMachineScaleSets
       containers:
         - name: web
           image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-web:11588ff # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
