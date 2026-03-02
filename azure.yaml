@@ -52,7 +52,8 @@ hooks:
       az aks get-credentials \
         -g "${AZURE_RESOURCE_GROUP}" \
         -n "${AZURE_AKS_CLUSTER_NAME}" \
-        --overwrite-existing
+        --overwrite-existing \
+        --admin
       echo "═══ Installing Flux Operator + Web UI..."
       kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
       echo "═══ Installing Gateway API CRDs..."
