@@ -8,12 +8,13 @@ spec:
   timeout: 30m
   install:
     remediation:
-      retries: 3
+      retries: 5
   upgrade:
     remediation:
-      retries: 3
+      retries: 5
       remediateLastFailure: true
     cleanupOnFail: true
+    force: true
   chart:
     spec:
       chart: erigon
