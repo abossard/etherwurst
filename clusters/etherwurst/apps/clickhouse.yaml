@@ -15,18 +15,12 @@ spec:
       max_server_memory_usage_to_ram_ratio: "0.9"
     users:
       etherwurst/password: "etherwurst-ch-2026"
-      etherwurst/networks/ip:
-        - "10.0.0.0/8"
-        - "172.16.0.0/12"
-        - "192.168.0.0/16"
+      etherwurst/networks/ip: "::/0"
       etherwurst/profile: analytics
       etherwurst/quota: default
       # Read-only user for dashboards and AI agents
       reader/password: "reader-ch-2026"
-      reader/networks/ip:
-        - "10.0.0.0/8"
-        - "172.16.0.0/12"
-        - "192.168.0.0/16"
+      reader/networks/ip: "::/0"
       reader/profile: readonly
       reader/quota: default
     profiles:
