@@ -1,0 +1,111 @@
+# ─── ADX ETL CronJob ──────────────────────────────────────────────────────────
+# Extracts blockchain data from Erigon via cryo → Parquet → Blob → ADX.
+# Runs daily at 02:00 UTC to minimize costs (ADX auto-stops when idle).
+#
+# Prerequisites:
+#   - cryo binary in the container image (or install at runtime)
+#   - Azure CLI authenticated via workload identity
+#   - ADX cluster and schema deployed (see src/etl/adx-schema.kql)
+#   - Storage container 'ethereum-etl' created in the storage account
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adx-etl-script
+  namespace: ethereum
+data:
+  adx_etl.py: |
+    # Mounted from ConfigMap — see src/etl/adx_etl.py for the full source.
+    # The actual script is baked into the container image; this ConfigMap
+    # is kept for quick iteration without rebuilding images.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: adx-etl-sync
+  namespace: ethereum
+  labels:
+    app: adx-etl
+spec:
+  schedule: "0 2 * * *"  # Daily at 02:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: adx-etl
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: etherwurst-app  # Workload identity SA
+          restartPolicy: OnFailure
+          initContainers:
+            # Install cryo binary (until we have a custom image)
+            - name: install-cryo
+              image: rust:1.83-slim
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  apt-get update -qq && apt-get install -y -qq curl
+                  curl -L https://github.com/paradigmxyz/cryo/releases/latest/download/cryo-x86_64-unknown-linux-gnu.tar.gz \
+                    | tar xz -C /shared/bin/
+              volumeMounts:
+                - name: shared-bin
+                  mountPath: /shared/bin
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+          containers:
+            - name: etl
+              image: python:3.12-slim
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Install Azure CLI + Kusto SDK
+                  pip install -q azure-cli azure-kusto-data azure-kusto-ingest azure-identity
+                  export PATH="/shared/bin:$PATH"
+                  python3 /scripts/adx_etl.py
+              env:
+                - name: ERIGON_RPC_URL
+                  value: "http://erigon:8545"
+                - name: ADX_CLUSTER_URI
+                  valueFrom:
+                    configMapKeyRef:
+                      name: cluster-config
+                      key: AZURE_ADX_CLUSTER_URI
+                - name: ADX_DATABASE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: cluster-config
+                      key: AZURE_ADX_DATABASE_NAME
+                - name: STORAGE_ACCOUNT_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: cluster-config
+                      key: AZURE_STORAGE_ACCOUNT_NAME
+                - name: STORAGE_CONTAINER
+                  value: "ethereum-etl"
+                - name: MAX_BLOCKS
+                  value: "50000"
+                - name: STOP_ADX_AFTER
+                  value: "false"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: shared-bin
+                  mountPath: /shared/bin
+              resources:
+                requests: { cpu: 500m, memory: 1Gi }
+                limits: { cpu: "2", memory: 4Gi }
+          volumes:
+            - name: scripts
+              configMap:
+                name: adx-etl-script
+            - name: shared-bin
+              emptyDir: {}

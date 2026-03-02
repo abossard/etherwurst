@@ -526,6 +526,28 @@ resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
   }
 }
 
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2024-01-01' = {
+  name: 'default'
+  parent: storage
+}
+
+resource etlContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2024-01-01' = {
+  name: 'ethereum-etl'
+  parent: blobService
+  properties: { publicAccess: 'None' }
+}
+
+// App identity → Storage Blob Data Contributor (ETL uploads Parquet files)
+resource appStorageBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, appIdentity.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+  scope: storage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalId: appIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // ─── Azure OpenAI (reasoning models, RBAC-only, no keys) ─────────────
 
 var reasoningModels = [
