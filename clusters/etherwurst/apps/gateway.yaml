@@ -1,12 +1,3 @@
-apiVersion: alb.networking.azure.io/v1
-kind: ApplicationLoadBalancer
-metadata:
-  name: etherwurst-alb
-  namespace: ethereum
-spec:
-  associations:
-    - ${AZURE_ALB_SUBNET_ID}
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -14,9 +5,8 @@ metadata:
   namespace: ethereum
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    alb.networking.azure.io/alb-id: etherwurst-alb
 spec:
-  gatewayClassName: azure-alb-external
+  gatewayClassName: nginx
   listeners:
     - name: http
       port: 80
