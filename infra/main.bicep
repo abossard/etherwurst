@@ -11,7 +11,7 @@ param location string = resourceGroup().location
 param privateNetworking bool = false
 
 @description('Enable Application Gateway for Containers (requires region support)')
-param enableAGC bool = false
+param enableAGC bool = true
 
 @description('Kubernetes version')
 param kubernetesVersion string = '1.34'
