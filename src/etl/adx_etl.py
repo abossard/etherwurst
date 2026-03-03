@@ -58,7 +58,9 @@ SIDECAR_MODE = os.environ.get("SIDECAR_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
 
 # ClickHouse dual-ingest (optional — set CLICKHOUSE_URL to enable)
-CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")  # e.g. http://clickhouse:8123
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")  # e.g. http://host:8123
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "etherwurst")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 
 WORK_DIR = "/tmp/cryo-extract"
 
@@ -186,7 +188,12 @@ def ingest_to_clickhouse(parquet_file, ch_table):
         return
     with open(parquet_file, "rb") as f:
         resp = _session.post(
-            f"{CLICKHOUSE_URL}/?query=INSERT+INTO+{ch_table}+FORMAT+Parquet",
+            CLICKHOUSE_URL,
+            params={
+                "query": f"INSERT INTO {ch_table} FORMAT Parquet",
+                "user": CLICKHOUSE_USER,
+                "password": CLICKHOUSE_PASSWORD,
+            },
             data=f,
             headers={"Content-Type": "application/octet-stream"},
             timeout=300,
@@ -202,7 +209,12 @@ def update_ch_progress(block_num):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         _session.post(
-            f"{CLICKHOUSE_URL}/?query=INSERT+INTO+etl_progress+VALUES('{WORKER_ID}',{block_num},'{ts}')",
+            CLICKHOUSE_URL,
+            params={
+                "query": f"INSERT INTO etl_progress VALUES('{WORKER_ID}',{block_num},'{ts}')",
+                "user": CLICKHOUSE_USER,
+                "password": CLICKHOUSE_PASSWORD,
+            },
             timeout=30,
         )
     except Exception:

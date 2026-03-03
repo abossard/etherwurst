@@ -56,6 +56,10 @@ spec:
                   value: "${AZURE_RESOURCE_GROUP}"
                 - name: CLICKHOUSE_URL
                   value: "http://clickhouse-ethereum-analytics:8123"
+                - name: CLICKHOUSE_USER
+                  value: "etherwurst"
+                - name: CLICKHOUSE_PASSWORD
+                  value: "etherwurst-ch-2026"
                 - name: MAX_BLOCKS
                   value: "100000"
                 - name: BATCH_SIZE
