@@ -14,7 +14,6 @@ spec:
       retries: 5
       remediateLastFailure: true
     cleanupOnFail: true
-    force: true
   chart:
     spec:
       chart: erigon
