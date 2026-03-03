@@ -399,6 +399,7 @@ resource appFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
 resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
   name: 'adx-etl-workload-identity'
   parent: appIdentity
+  dependsOn: [appFederatedCredential]
   properties: {
     issuer: aks.properties.oidcIssuerProfile.issuerURL
     subject: 'system:serviceaccount:ethereum:adx-etl-sa'
@@ -631,9 +632,6 @@ resource etlContainer 'Microsoft.Storage/storageAccounts/blobServices/containers
 // Note: Storage Blob Data Contributor for appIdentity is assigned above as appIdentityStorageRole
 
 // ─── Azure AI Foundry (Hub + Project, RBAC-only, no keys) ────────────
-// Phase 1: Old OpenAI account removed. Run `azd provision` to detach,
-//   then `az cognitiveservices account delete -n oai-hazscam-r3is7 -g rg-hazscam-gwc`
-// Phase 2: Uncomment the AI Foundry resources below and run `azd provision` again.
 
 var aiFoundryProjectName = '${aiFoundryName}-proj'
 

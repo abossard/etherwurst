@@ -1,0 +1,254 @@
+@page "/"
+@inject PriceDatabase Db
+@inject CollectorService Collector
+@implements IDisposable
+
+<PageTitle>Spot VM Pricing Dashboard</PageTitle>
+
+@if (Collector.IsCollecting)
+{
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Sync">
+        Collecting prices: @Collector.CurrentRegion
+        (@Collector.RegionsCompleted / @Collector.TotalRegions regions)
+    </MudAlert>
+}
+
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid>
+        <MudItem xs="12">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">
+                <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" Class="mr-1" />
+                Find your ideal Spot VM — no SKU knowledge needed
+            </MudText>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" Label="Regions" MultiSelection="true"
+                       @bind-SelectedValues="_selectedRegions"
+                       Variant="Variant.Outlined" Dense="true"
+                       AnchorOrigin="Origin.BottomCenter" Placeholder="All regions">
+                @foreach (var r in _availableRegions)
+                {
+                    <MudSelectItem Value="@r">@RegionFormatter.Format(r)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect T="string" Label="Category" MultiSelection="true"
+                       @bind-SelectedValues="_selectedFamilies"
+                       Variant="Variant.Outlined" Dense="true" Placeholder="All categories">
+                @foreach (var f in _availableFamilies)
+                {
+                    <MudSelectItem Value="@f">@f</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int?" Label="Min vCPUs" @bind-Value="_minCpus"
+                             Variant="Variant.Outlined" Min="1" Max="256" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int?" Label="Max vCPUs" @bind-Value="_maxCpus"
+                             Variant="Variant.Outlined" Min="1" Max="256" />
+        </MudItem>
+        <MudItem xs="12" md="1" Class="d-flex align-end">
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Primary"
+                           Variant="Variant.Filled" OnClick="LoadPrices" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_prices.Count > 0)
+{
+    <MudGrid Class="mb-4">
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 text-center" Elevation="1">
+                <MudText Typo="Typo.h4" Color="Color.Primary">@_prices.Count</MudText>
+                <MudText Typo="Typo.caption">Spot VMs Found</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 text-center" Elevation="1">
+                <MudText Typo="Typo.h4" Color="Color.Secondary">@GetCheapestPrice()</MudText>
+                <MudText Typo="Typo.caption">Cheapest Spot $/hr</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 text-center" Elevation="1">
+                <MudText Typo="Typo.h4" Style="color: #4caf50;">@GetAvgSavings()</MudText>
+                <MudText Typo="Typo.caption">Avg Savings vs On-Demand</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 text-center" Elevation="1">
+                <MudText Typo="Typo.h4">@GetRegionCount()</MudText>
+                <MudText Typo="Typo.caption">Regions</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+<MudDataGrid T="SpotVmPrice" Items="@_prices" Dense="true" Hover="true" Striped="true"
+             Filterable="true" SortMode="SortMode.Multiple" Groupable="true"
+             RowsPerPage="25" FixedHeader="true" Loading="@_loading"
+             QuickFilter="@_quickFilter">
+    <ToolBarContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.PriceChange" Class="mr-1" />
+            Spot VM Prices
+        </MudText>
+        <MudSpacer />
+        <MudTextField @bind-Value="_searchTerm" Placeholder="Quick search..."
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      IconSize="Size.Medium" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Class="mt-0" Immediate="true" />
+    </ToolBarContent>
+
+    <Columns>
+        <PropertyColumn Property="x => x.FriendlyCategory" Title="Category" Groupable="true" />
+        <TemplateColumn Title="VM">
+            <CellTemplate>
+                <MudText Typo="Typo.body2">
+                    <strong>@context.Item.VCpus vCPUs</strong> · @context.Item.MemoryGB GB RAM
+                </MudText>
+                <MudText Typo="Typo.caption" Style="opacity: 0.6">@context.Item.VmSize</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+        <PropertyColumn Property="x => x.VCpus" Title="vCPUs" />
+        <PropertyColumn Property="x => x.MemoryGB" Title="RAM (GB)" />
+        <TemplateColumn Title="Spot $/hr">
+            <CellTemplate>
+                <MudText Color="Color.Primary" Typo="Typo.body2">@FormatSpotPrice(context.Item)</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="On-Demand $/hr">
+            <CellTemplate>
+                <MudText Typo="Typo.body2" Style="opacity: 0.7">@FormatOnDemandPrice(context.Item)</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="Savings">
+            <CellTemplate>
+                <MudChip T="string" Color="@GetSavingsColor(context.Item)" Size="Size.Small">@GetSavingsText(context.Item)</MudChip>
+            </CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="Monthly Est.">
+            <CellTemplate>@FormatMonthlyCost(context.Item)</CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="Eviction Risk">
+            <CellTemplate>
+                <MudChip T="string" Size="Size.Small" Style="@GetEvictionStyle(context.Item)">@PriceCalculations.EvictionRisk(context.Item.EvictionRate)</MudChip>
+            </CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="Region" Groupable="true">
+            <CellTemplate>
+                <MudText Typo="Typo.body2">@RegionFormatter.Format(context.Item.Region)</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+    </Columns>
+
+    <PagerContent>
+        <MudDataGridPager T="SpotVmPrice" />
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<SpotVmPrice> _prices = new();
+    private List<string> _availableRegions = new();
+    private List<string> _availableFamilies = new();
+    private IEnumerable<string> _selectedRegions = Array.Empty<string>();
+    private IEnumerable<string> _selectedFamilies = Array.Empty<string>();
+    private int? _minCpus;
+    private int? _maxCpus;
+    private string _searchTerm = "";
+    private bool _loading = true;
+    private Timer? _refreshTimer;
+
+    private Func<SpotVmPrice, bool> _quickFilter
+    {
+        get
+        {
+            return (SpotVmPrice p) =>
+                string.IsNullOrWhiteSpace(_searchTerm) ||
+                p.FriendlyCategory.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                p.VmSize.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                p.Region.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        LoadPrices();
+        _refreshTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            RefreshMetadata();
+            if (Collector.IsCollecting || _prices.Count == 0)
+                LoadPrices();
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10));
+    }
+
+    private void LoadPrices()
+    {
+        _loading = true;
+        RefreshMetadata();
+        var regionList = _selectedRegions.Any() ? _selectedRegions.ToList() : null;
+        var familyList = _selectedFamilies.Any() ? _selectedFamilies.ToList() : null;
+        _prices = Db.QueryPrices(regionList, familyList, _minCpus, _maxCpus);
+        _loading = false;
+    }
+
+    private void RefreshMetadata()
+    {
+        _availableRegions = Db.GetRegions();
+        _availableFamilies = Db.GetFamilies();
+    }
+
+    private string GetCheapestPrice()
+    {
+        if (_prices.Count == 0) return "-";
+        return "$" + _prices.Min(p => p.SpotPricePerHour).ToString("F4");
+    }
+
+    private string GetAvgSavings()
+    {
+        if (_prices.Count == 0) return "-";
+        var s = PriceCalculations.SavingsPercent(
+            _prices.Average(p => p.OnDemandPricePerHour),
+            _prices.Average(p => p.SpotPricePerHour));
+        return s.ToString("F0") + "%";
+    }
+
+    private int GetRegionCount()
+    {
+        return _prices.Select(p => p.Region).Distinct().Count();
+    }
+
+    private static string FormatSpotPrice(SpotVmPrice p) => "$" + p.SpotPricePerHour.ToString("F4");
+
+    private static string FormatOnDemandPrice(SpotVmPrice p) => "$" + p.OnDemandPricePerHour.ToString("F4");
+
+    private static string GetSavingsText(SpotVmPrice p) =>
+        PriceCalculations.SavingsPercent(p.OnDemandPricePerHour, p.SpotPricePerHour) + "%";
+
+    private static Color GetSavingsColor(SpotVmPrice p)
+    {
+        var sav = PriceCalculations.SavingsPercent(p.OnDemandPricePerHour, p.SpotPricePerHour);
+        if (sav >= 80) return Color.Success;
+        if (sav >= 50) return Color.Info;
+        if (sav >= 20) return Color.Warning;
+        return Color.Error;
+    }
+
+    private static string FormatMonthlyCost(SpotVmPrice p) =>
+        "$" + PriceCalculations.MonthlyCost(p.SpotPricePerHour).ToString("F2");
+
+    private static string GetEvictionStyle(SpotVmPrice p)
+    {
+        var bg = PriceCalculations.EvictionColor(p.EvictionRate);
+        return "background-color: " + bg + "; color: white;";
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+}

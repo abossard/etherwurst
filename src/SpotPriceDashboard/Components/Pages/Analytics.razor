@@ -1,0 +1,295 @@
+@page "/analytics"
+@inject PriceDatabase Db
+
+<PageTitle>Spot VM Analytics</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Analytics" Class="mr-2" />
+    Spot Pricing Analytics
+</MudText>
+
+@* ── Filters ── *@
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid>
+        <MudItem xs="12" md="3">
+            <MudSelect T="string" Label="Regions" MultiSelection="true"
+                       @bind-SelectedValues="_selectedRegions"
+                       Variant="Variant.Outlined" Dense="true" Placeholder="All regions">
+                @foreach (var r in _availableRegions)
+                {
+                    <MudSelectItem Value="@r">@RegionFormatter.Format(r)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect T="string" Label="Category" MultiSelection="true"
+                       @bind-SelectedValues="_selectedFamilies"
+                       Variant="Variant.Outlined" Dense="true" Placeholder="All categories">
+                @foreach (var f in _availableFamilies)
+                {
+                    <MudSelectItem Value="@f">@f</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int?" Label="Min vCPUs" @bind-Value="_minCpus"
+                             Variant="Variant.Outlined" Min="1" Max="256" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int?" Label="Max vCPUs" @bind-Value="_maxCpus"
+                             Variant="Variant.Outlined" Min="1" Max="256" />
+        </MudItem>
+        <MudItem xs="12" md="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="RefreshCharts" StartIcon="@Icons.Material.Filled.Refresh">
+                Update Charts
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* ── Row 1: Savings Distribution + Eviction Risk ── *@
+<MudGrid Class="mb-4">
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">Savings vs On-Demand</MudText>
+            @if (_savingsLabels.Length > 0)
+            {
+                <MudChart ChartType="ChartType.Bar"
+                          ChartSeries="@_savingsSeries"
+                          XAxisLabels="@_savingsLabels"
+                          Width="100%" Height="300px"
+                          ChartOptions="@_barOptions" />
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No data yet — waiting for collection.</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="2">
+            <MudText Typo="Typo.h6" Class="mb-3">Eviction Risk Distribution</MudText>
+            @if (_evictionLabels.Length > 0)
+            {
+                <MudChart ChartType="ChartType.Donut"
+                          InputData="@_evictionData"
+                          InputLabels="@_evictionLabels"
+                          Width="100%" Height="300px"
+                          ChartOptions="@_donutOptions" />
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No eviction data. Run 'az login' for eviction rates.</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* ── Row 2: Price per vCPU by Category (multi-region line chart) ── *@
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudText Typo="Typo.h6" Class="mb-3">Average Spot Price per vCPU — by Category</MudText>
+    <MudText Typo="Typo.caption" Class="mb-2">Lower is better. Each line is a region.</MudText>
+    @if (_pricePerCpuLabels.Length > 0)
+    {
+        <MudChart ChartType="ChartType.Line"
+                  ChartSeries="@_pricePerCpuSeries"
+                  XAxisLabels="@_pricePerCpuLabels"
+                  Width="100%" Height="350px"
+                  ChartOptions="@_lineOptions" />
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">No data yet.</MudText>
+    }
+</MudPaper>
+
+@* ── Row 3: Regional Price Comparison for specific vCPU count ── *@
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid>
+        <MudItem xs="12" md="9">
+            <MudText Typo="Typo.h6">Regional Price Comparison</MudText>
+            <MudText Typo="Typo.caption">Average spot vs on-demand price for VMs with the selected vCPU count</MudText>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect T="int" Label="vCPU Count" @bind-Value="_selectedVCpuForRegion"
+                       Variant="Variant.Outlined" Dense="true">
+                @foreach (var v in _availableVCpus)
+                {
+                    <MudSelectItem Value="@v">@v vCPUs</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+    <div class="mt-3">
+        @if (_regionCompareLabels.Length > 0)
+        {
+            <MudChart ChartType="ChartType.Bar"
+                      ChartSeries="@_regionCompareSeries"
+                      XAxisLabels="@_regionCompareLabels"
+                      Width="100%" Height="350px"
+                      ChartOptions="@_barOptions" />
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Select a vCPU count and click Update Charts.</MudText>
+        }
+    </div>
+</MudPaper>
+
+@* ── Row 4: Category breakdown stacked bar ── *@
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudText Typo="Typo.h6" Class="mb-3">VM Count by Category & Region</MudText>
+    @if (_categoryCountLabels.Length > 0)
+    {
+        <MudChart ChartType="ChartType.StackedBar"
+                  ChartSeries="@_categoryCountSeries"
+                  XAxisLabels="@_categoryCountLabels"
+                  Width="100%" Height="350px"
+                  ChartOptions="@_barOptions" />
+    }
+</MudPaper>
+
+@code {
+    private List<string> _availableRegions = new();
+    private List<string> _availableFamilies = new();
+    private List<int> _availableVCpus = new();
+    private IEnumerable<string> _selectedRegions = Array.Empty<string>();
+    private IEnumerable<string> _selectedFamilies = Array.Empty<string>();
+    private int? _minCpus;
+    private int? _maxCpus;
+    private int _selectedVCpuForRegion = 4;
+
+    // Savings distribution chart
+    private string[] _savingsLabels = Array.Empty<string>();
+    private List<ChartSeries> _savingsSeries = new();
+
+    // Eviction chart
+    private string[] _evictionLabels = Array.Empty<string>();
+    private double[] _evictionData = Array.Empty<double>();
+
+    // Price per vCPU line chart
+    private string[] _pricePerCpuLabels = Array.Empty<string>();
+    private List<ChartSeries> _pricePerCpuSeries = new();
+
+    // Regional comparison
+    private string[] _regionCompareLabels = Array.Empty<string>();
+    private List<ChartSeries> _regionCompareSeries = new();
+
+    // Category count stacked bar
+    private string[] _categoryCountLabels = Array.Empty<string>();
+    private List<ChartSeries> _categoryCountSeries = new();
+
+    private ChartOptions _barOptions = new() { YAxisTicks = 5, MaxNumYAxisTicks = 8 };
+    private ChartOptions _lineOptions = new() { YAxisTicks = 5, MaxNumYAxisTicks = 8, LineStrokeWidth = 2 };
+    private ChartOptions _donutOptions = new();
+
+    protected override void OnInitialized()
+    {
+        _availableRegions = Db.GetRegions();
+        _availableFamilies = Db.GetFamilies();
+        _availableVCpus = Db.GetDistinctVCpus();
+        if (_availableVCpus.Count > 0 && !_availableVCpus.Contains(_selectedVCpuForRegion))
+            _selectedVCpuForRegion = _availableVCpus.FirstOrDefault(v => v >= 4, _availableVCpus[0]);
+        RefreshCharts();
+    }
+
+    private void RefreshCharts()
+    {
+        var regions = _selectedRegions.Any() ? _selectedRegions.ToList() : null;
+        var families = _selectedFamilies.Any() ? _selectedFamilies.ToList() : null;
+
+        BuildSavingsChart(regions, families);
+        BuildEvictionChart(regions, families);
+        BuildPricePerCpuChart(regions);
+        BuildRegionalComparisonChart(families);
+        BuildCategoryCountChart(regions);
+    }
+
+    private void BuildSavingsChart(List<string>? regions, List<string>? families)
+    {
+        var data = Db.GetSavingsDistribution(regions, families, _minCpus, _maxCpus);
+        _savingsLabels = data.Select(d => d.Bracket).ToArray();
+        _savingsSeries = new List<ChartSeries>
+        {
+            new() { Name = "VM Count", Data = data.Select(d => (double)d.Count).ToArray() }
+        };
+    }
+
+    private void BuildEvictionChart(List<string>? regions, List<string>? families)
+    {
+        var data = Db.GetEvictionDistribution(regions, families);
+        var nonUnknown = data.Where(d => d.Rate != "Unknown").ToList();
+        if (nonUnknown.Count == 0)
+        {
+            _evictionLabels = Array.Empty<string>();
+            _evictionData = Array.Empty<double>();
+            return;
+        }
+        _evictionLabels = nonUnknown.Select(d => PriceCalculations.EvictionRisk(d.Rate) + " (" + d.Rate + "%)").ToArray();
+        _evictionData = nonUnknown.Select(d => (double)d.Count).ToArray();
+    }
+
+    private void BuildPricePerCpuChart(List<string>? regions)
+    {
+        var data = Db.GetPricePerVCpuByCategory(regions, _minCpus, _maxCpus);
+        if (data.Count == 0) { _pricePerCpuLabels = Array.Empty<string>(); return; }
+
+        var categories = data.Select(d => d.Category).Distinct().OrderBy(c => c).ToList();
+        var chartRegions = data.Select(d => d.Region).Distinct().OrderBy(r => r).ToList();
+
+        _pricePerCpuLabels = categories.ToArray();
+        _pricePerCpuSeries = new List<ChartSeries>();
+
+        foreach (var region in chartRegions)
+        {
+            var values = new double[categories.Count];
+            for (var i = 0; i < categories.Count; i++)
+            {
+                var point = data.FirstOrDefault(d => d.Category == categories[i] && d.Region == region);
+                values[i] = point != null ? (double)Math.Round(point.AvgSpotPerVCpu, 4) : 0;
+            }
+            _pricePerCpuSeries.Add(new ChartSeries
+            {
+                Name = RegionFormatter.Format(region),
+                Data = values
+            });
+        }
+    }
+
+    private void BuildRegionalComparisonChart(List<string>? families)
+    {
+        var data = Db.GetAvgPriceByRegion(_selectedVCpuForRegion, families);
+        if (data.Count == 0) { _regionCompareLabels = Array.Empty<string>(); return; }
+
+        _regionCompareLabels = data.Select(d => RegionFormatter.Format(d.Region)).ToArray();
+        _regionCompareSeries = new List<ChartSeries>
+        {
+            new() { Name = "Spot $/hr", Data = data.Select(d => (double)Math.Round(d.AvgSpot, 4)).ToArray() },
+            new() { Name = "On-Demand $/hr", Data = data.Select(d => (double)Math.Round(d.AvgOnDemand, 4)).ToArray() }
+        };
+    }
+
+    private void BuildCategoryCountChart(List<string>? regions)
+    {
+        var data = Db.GetPricePerVCpuByCategory(regions, _minCpus, _maxCpus);
+        if (data.Count == 0) { _categoryCountLabels = Array.Empty<string>(); return; }
+
+        var chartRegions = data.Select(d => d.Region).Distinct().OrderBy(r => r).ToList();
+        var categories = data.Select(d => d.Category).Distinct().OrderBy(c => c).ToList();
+
+        _categoryCountLabels = chartRegions.Select(r => RegionFormatter.Format(r)).ToArray();
+        _categoryCountSeries = new List<ChartSeries>();
+
+        foreach (var cat in categories)
+        {
+            var values = new double[chartRegions.Count];
+            for (var i = 0; i < chartRegions.Count; i++)
+            {
+                var point = data.FirstOrDefault(d => d.Category == cat && d.Region == chartRegions[i]);
+                values[i] = point?.Count ?? 0;
+            }
+            _categoryCountSeries.Add(new ChartSeries { Name = cat, Data = values });
+        }
+    }
+}

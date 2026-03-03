@@ -5,6 +5,7 @@
     <Project Path="src/HazMeBeenScammed.Core/HazMeBeenScammed.Core.csproj" />
     <Project Path="src/HazMeBeenScammed.ServiceDefaults/HazMeBeenScammed.ServiceDefaults.csproj" />
     <Project Path="src/HazMeBeenScammed.Web/HazMeBeenScammed.Web.csproj" />
+    <Project Path="src/SpotPriceDashboard/SpotPriceDashboard.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HazMeBeenScammed.Tests/HazMeBeenScammed.Tests.csproj" />

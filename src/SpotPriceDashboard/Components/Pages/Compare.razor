@@ -1,0 +1,152 @@
+@page "/compare"
+@inject PriceDatabase Db
+
+<PageTitle>Region Comparison</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.CompareArrows" Class="mr-2" />
+    Compare Spot Prices Across Regions
+</MudText>
+
+<MudPaper Class="pa-4 mb-4" Elevation="2">
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudSelect T="string" Label="Select regions to compare" MultiSelection="true"
+                       @bind-SelectedValues="_selectedRegions" Variant="Variant.Outlined" Dense="true">
+                @foreach (var r in _availableRegions)
+                {
+                    <MudSelectItem Value="@r">@FormatRegion(r)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" Label="Category" @bind-Value="_selectedFamily"
+                       Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@("")">All</MudSelectItem>
+                @foreach (var f in _availableFamilies)
+                {
+                    <MudSelectItem Value="@f">@f</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunComparison"
+                       StartIcon="@Icons.Material.Filled.CompareArrows">
+                Compare
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_comparisonData.Count > 0)
+{
+    <MudText Typo="Typo.subtitle1" Class="mb-2">
+        Showing @_comparisonData.Count VM sizes across @_selectedRegions.Count() regions
+        — <strong style="color: #4caf50">green = cheapest region</strong>
+    </MudText>
+
+    <MudSimpleTable Dense="true" Hover="true" Striped="true" FixedHeader="true"
+                    Style="max-height: calc(100vh - 380px); overflow-y: auto;">
+        <thead>
+            <tr>
+                <th>VM</th>
+                <th>vCPUs</th>
+                <th>RAM</th>
+                @foreach (var region in _selectedRegions)
+                {
+                    <th>@FormatRegion(region)</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _comparisonData)
+            {
+                <tr>
+                    <td>
+                        <strong>@row.Category</strong><br />
+                        <span style="font-size: 0.8em; opacity: 0.6">@row.VmSize</span>
+                    </td>
+                    <td>@row.VCpus</td>
+                    <td>@row.MemoryGB GB</td>
+                    @foreach (var region in _selectedRegions)
+                    {
+                        var price = row.RegionPrices.GetValueOrDefault(region);
+                        var isCheapest = price.HasValue && price == row.RegionPrices.Values.Where(v => v.HasValue).Min();
+                        <td style="@(isCheapest ? "background-color: rgba(76,175,80,0.2); font-weight: bold;" : "")">
+                            @if (price.HasValue)
+                            {
+                                <span>$@price.Value.ToString("F4")/hr</span>
+                                <br />
+                                <span style="font-size: 0.8em; opacity: 0.6">
+                                    $@PriceCalculations.MonthlyCost(price.Value).ToString("F2")/mo
+                                </span>
+                            }
+                            else
+                            {
+                                <span style="opacity: 0.3">—</span>
+                            }
+                        </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+else if (_hasCompared)
+{
+    <MudAlert Severity="Severity.Info">Select at least 2 regions and click Compare.</MudAlert>
+}
+
+@code {
+    List<string> _availableRegions = new();
+    List<string> _availableFamilies = new();
+    IEnumerable<string> _selectedRegions = Array.Empty<string>();
+    string _selectedFamily = "";
+    bool _hasCompared;
+    List<ComparisonRow> _comparisonData = new();
+
+    protected override void OnInitialized()
+    {
+        _availableRegions = Db.GetRegions();
+        _availableFamilies = Db.GetFamilies();
+    }
+
+    void RunComparison()
+    {
+        _hasCompared = true;
+        var regions = _selectedRegions.ToList();
+        if (regions.Count < 2) return;
+
+        var familyFilter = string.IsNullOrEmpty(_selectedFamily) ? null : new List<string> { _selectedFamily };
+        var allPrices = Db.QueryPrices(regions, familyFilter);
+
+        // Group by VM size, then pivot by region
+        _comparisonData = allPrices
+            .GroupBy(p => p.VmSize)
+            .Select(g =>
+            {
+                var first = g.First();
+                var regionPrices = new Dictionary<string, decimal?>();
+                foreach (var r in regions)
+                {
+                    var match = g.FirstOrDefault(p => p.Region == r);
+                    regionPrices[r] = match?.SpotPricePerHour;
+                }
+                return new ComparisonRow(
+                    first.VmSize,
+                    first.FriendlyCategory,
+                    first.VCpus,
+                    first.MemoryGB,
+                    regionPrices);
+            })
+            .OrderBy(r => r.Category)
+            .ThenBy(r => r.VCpus)
+            .ThenBy(r => r.MemoryGB)
+            .ToList();
+    }
+
+    record ComparisonRow(string VmSize, string Category, int VCpus, decimal MemoryGB,
+        Dictionary<string, decimal?> RegionPrices);
+
+    static string FormatRegion(string region) => RegionFormatter.Format(region);
+}

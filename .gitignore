@@ -31,3 +31,4 @@ Properties/launchSettings.json.user
 # Bicep compiled ARM output
 infra/*.json
 !infra/main.parameters.json
+src/etl/__pycache__/

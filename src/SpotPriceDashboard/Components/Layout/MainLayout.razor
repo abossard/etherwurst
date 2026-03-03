@@ -1,0 +1,47 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Dense="true">
+        <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" />
+        <MudText Typo="Typo.h6" Class="mr-4">Spot VM Pricing</MudText>
+        <MudButton Href="/" Color="Color.Inherit" Variant="Variant.Text">Dashboard</MudButton>
+        <MudButton Href="/analytics" Color="Color.Inherit" Variant="Variant.Text">Analytics</MudButton>
+        <MudButton Href="/compare" Color="Color.Inherit" Variant="Variant.Text">Compare</MudButton>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Inherit"
+                       Href="/api/status" Target="_blank" Title="API Status" />
+    </MudAppBar>
+
+    <MudMainContent Class="pa-4">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976d2",
+            Secondary = "#00bcd4",
+            AppbarBackground = "#1565c0"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#42a5f5",
+            Secondary = "#26c6da",
+            Surface = "#1e1e2e",
+            Background = "#11111b",
+            AppbarBackground = "#181825"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography { FontFamily = ["Inter", "Helvetica", "Arial", "sans-serif"] }
+        }
+    };
+}

@@ -7,7 +7,7 @@ infra:
   module: main
   deploymentStacks:
     actionOnUnmanage:
-      resources: delete
+      resources: detach
       resourceGroups: detach
     denySettings:
       mode: denyDelete

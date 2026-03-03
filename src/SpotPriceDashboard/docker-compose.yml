@@ -1,0 +1,19 @@
+services:
+  spotdashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5080:8080"
+    volumes:
+      - spotdata:/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - DbPath=/data/spotprices.db
+      # Uncomment and set these for eviction rate data:
+      # - AZURE_CLIENT_ID=
+      # - AZURE_TENANT_ID=
+      # - AZURE_CLIENT_SECRET=
+
+volumes:
+  spotdata:
