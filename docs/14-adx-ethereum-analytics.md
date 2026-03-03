@@ -578,64 +578,47 @@ resource adxCluster 'Microsoft.Kusto/clusters@2023-08-15' = {
 - Data is preserved (stored in Azure Storage, not lost)
 - No compute charges while stopped; only storage charges apply
 
-### ETL Scheduling Strategy
+### ETL Scheduling Strategy (Implemented)
 
-**For cost-optimized operation:**
+The ETL runs as a Flux-managed Kubernetes CronJob using a **micro-batch architecture**:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Daily Schedule (UTC)                                    │
 │                                                          │
-│  00:00 ─── Azure Automation: Start ADX cluster           │
-│  00:15 ─── Wait for cluster ready                        │
-│  00:20 ─── CronJob: Run cryo extraction                  │
-│            cryo blocks txs logs traces                   │
-│            -b LAST_BLOCK:LATEST --rpc erigon:8545        │
-│            -o azure://storageacct/ethereum/              │
-│  01:00 ─── ADX: Auto-ingests from blob (Event Grid)     │
-│  02:00 ─── ETL complete, cluster idle                    │
-│  07:00 ─── If no queries, auto-stop kicks in after 5d   │
-│            (or stop immediately via automation)           │
+│  02:00 ─── CronJob: adx-etl-sync triggers               │
+│            1. az login (workload identity)                │
+│            2. Query chain head from Erigon                │
+│            3. Ensure ADX cluster is running               │
+│            4. Read last progress from EtlProgress table   │
+│            5. Process blocks in 1000-block micro-batches: │
+│               a. cryo extract (blocks/txs/logs → Parquet) │
+│               b. ingest_from_file → ADX (SDK staging)    │
+│               c. Cleanup Parquet, save progress           │
+│            6. Stop ADX cluster (STOP_ADX_AFTER=true)     │
 │                                                          │
-│  Cost: ~$0.12/hr × 2hr = $0.24/day = $7.20/month       │
-│  + storage: ~$20-50/month for compressed Parquet         │
-│  Total: ~$30-60/month for full Ethereum analytics        │
+│  Performance: ~3-5 blocks/sec with concurrency=6         │
+│  Daily catch-up of ~7,200 blocks takes ~30 min           │
+│  Cost: ~$0.12/hr × 1hr = $0.12/day = $3.60/month       │
+│  + storage: ~$5-10/month for compressed Parquet          │
+│  Total: ~$10-15/month for full Ethereum analytics        │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Automation script (Azure CLI):**
+**Key design decisions:**
+- **Micro-batch (not monolithic):** Bounds memory to ~200MB regardless of total block range
+- **ingest_from_file (not blob):** SDK handles staging automatically, no blob container needed
+- **Incremental progress:** Crash only loses current 1000-block batch, resumes from last checkpoint
+- **ADX auto-stop:** Cluster stops after ETL completes, wakes on next query/run
 
-```bash
-#!/bin/bash
-# start-adx-etl.sh — Run as Azure Automation Runbook or K8s CronJob
-
-CLUSTER="etherwurst-adx"
-RG="etherwurst-rg"
-DB="ethereum"
-
-# 1. Start ADX cluster
-az kusto cluster start --name $CLUSTER --resource-group $RG
-az kusto cluster wait --name $CLUSTER --resource-group $RG --custom "provisioningState=='Succeeded'"
-
-# 2. Get last ingested block from ADX
-LAST_BLOCK=$(az kusto query --cluster-name $CLUSTER --database-name $DB \
-  --query "Blocks | summarize max(number)" --resource-group $RG \
-  | jq -r '.[0].max_number // 0')
-
-# 3. Run cryo extraction
-cryo blocks transactions logs traces \
-  -b ${LAST_BLOCK}:latest \
-  --rpc http://erigon:8545 \
-  -o /tmp/ethereum-extract/
-
-# 4. Upload to blob (Event Grid auto-triggers ADX ingestion)
-az storage blob upload-batch \
-  -d ethereum \
-  -s /tmp/ethereum-extract/ \
-  --account-name etherwurststorage
-
-# 5. Optionally stop cluster immediately after ingestion
-# az kusto cluster stop --name $CLUSTER --resource-group $RG
+**Configuration (via Flux ConfigMap substitution):**
+```yaml
+BATCH_SIZE: "1000"        # Blocks per micro-batch
+CRYO_CONCURRENCY: "6"    # Parallel RPC requests
+CRYO_CHUNK_SIZE: "2000"  # cryo internal chunking
+CRYO_RPS: "50"           # Rate limit on Erigon RPC
+MAX_BLOCKS: "100000"     # Max blocks per run
+STOP_ADX_AFTER: "true"   # Stop ADX when done
 ```
 
 ### Incremental vs Full Sync

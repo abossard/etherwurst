@@ -57,15 +57,15 @@ spec:
                 - name: MAX_BLOCKS
                   value: "100000"
                 - name: BATCH_SIZE
-                  value: "500"
+                  value: "1000"
                 - name: CRYO_CONCURRENCY
-                  value: "4"
+                  value: "6"
                 - name: CRYO_CHUNK_SIZE
                   value: "2000"
                 - name: CRYO_RPS
-                  value: "30"
+                  value: "50"
                 - name: STOP_ADX_AFTER
-                  value: "false"
+                  value: "true"
                 - name: FIRST_RUN_LOOKBACK
                   value: "1000"
                 - name: PYTHONUNBUFFERED

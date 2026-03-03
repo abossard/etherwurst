@@ -186,6 +186,7 @@ def process_batch(batch_start, batch_end, ingest_client):
             "--chunk-size", CRYO_CHUNK_SIZE,
             "--max-concurrent-requests", CRYO_CONCURRENCY,
             "--requests-per-second", CRYO_RPS,
+            "--no-report",
         ]
         run(cmd, timeout=3600)
 
