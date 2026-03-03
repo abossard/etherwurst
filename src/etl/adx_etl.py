@@ -57,13 +57,22 @@ WORKER_ID = os.environ.get("WORKER_ID", "cryo")  # progress key for parallel wor
 SIDECAR_MODE = os.environ.get("SIDECAR_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
 
+# ClickHouse dual-ingest (optional — set CLICKHOUSE_URL to enable)
+CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")  # e.g. http://clickhouse:8123
+
 WORK_DIR = "/tmp/cryo-extract"
 
-# cryo dataset → ADX table mapping
+# cryo dataset → ADX table / ClickHouse table mapping
 DATASETS = {
     "blocks": "Blocks",
     "transactions": "Transactions",
     "logs": "Logs",
+}
+# ClickHouse uses lowercase table names
+CH_TABLES = {
+    "blocks": "blocks",
+    "transactions": "transactions",
+    "logs": "logs",
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -169,6 +178,37 @@ def stop_adx():
     )
 
 
+# ── ClickHouse ingestion ─────────────────────────────────────────────────────
+
+def ingest_to_clickhouse(parquet_file, ch_table):
+    """Ingest a Parquet file into ClickHouse via HTTP interface."""
+    if not CLICKHOUSE_URL:
+        return
+    with open(parquet_file, "rb") as f:
+        resp = _session.post(
+            f"{CLICKHOUSE_URL}/?query=INSERT+INTO+{ch_table}+FORMAT+Parquet",
+            data=f,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=300,
+        )
+    if resp.status_code != 200:
+        print(f"    CH ingest error ({ch_table}): {resp.text[:200]}", file=sys.stderr)
+
+
+def update_ch_progress(block_num):
+    """Update progress in ClickHouse."""
+    if not CLICKHOUSE_URL:
+        return
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        _session.post(
+            f"{CLICKHOUSE_URL}/?query=INSERT+INTO+etl_progress+VALUES('{WORKER_ID}',{block_num},'{ts}')",
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
 # ── ETL progress tracking ────────────────────────────────────────────────────
 
 def get_last_ingested_block(client):
@@ -230,15 +270,20 @@ def process_batch(batch_start, batch_end, ingest_client):
             table=table,
             data_format=DataFormat.PARQUET,
         )
+        ch_table = CH_TABLES.get(dataset)
         for f in parquet_files:
             ingest_client.ingest_from_file(f, ingestion_properties=props)
+            # Dual-ingest into ClickHouse (if configured)
+            if ch_table:
+                ingest_to_clickhouse(f, ch_table)
             files_ingested += 1
 
         # Remove ingested files to free disk space before next dataset
         for f in parquet_files:
             os.remove(f)
 
-        print(f"    {table}: {len(parquet_files)} files ingested")
+        ch_tag = " +CH" if CLICKHOUSE_URL else ""
+        print(f"    {table}: {len(parquet_files)} files ingested{ch_tag}")
 
     cleanup()
     return files_ingested
@@ -250,6 +295,7 @@ def main():
     print("═══ ADX ETL (Micro-batch) starting ═══")
     print(f"  Erigon:  {ERIGON_RPC}")
     print(f"  ADX:     {ADX_CLUSTER_URI}")
+    print(f"  CH:      {CLICKHOUSE_URL or 'disabled'}")
     print(f"  Batch:   {BATCH_SIZE} blocks")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
 
@@ -323,6 +369,7 @@ def main():
 
             # Save progress after each successful batch
             update_progress(kusto, batch_end - 1)
+            update_ch_progress(batch_end - 1)
 
             elapsed = time.time() - t_batch
             bps = (batch_end - batch_start) / elapsed if elapsed > 0 else 0

@@ -80,6 +80,8 @@ spec:
             value: "${AZURE_ADX_DATABASE_NAME}"
           - name: AZURE_RESOURCE_GROUP
             value: "${AZURE_RESOURCE_GROUP}"
+          - name: CLICKHOUSE_URL
+            value: "http://clickhouse-ethereum-analytics:8123"
           - name: SIDECAR_MODE
             value: "true"
           - name: LOOP_SLEEP_SECS
