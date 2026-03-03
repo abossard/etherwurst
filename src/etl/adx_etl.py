@@ -15,19 +15,20 @@ Architecture:
 
 Environment:
   ERIGON_RPC_URL          Erigon JSON-RPC endpoint
-  ADX_ENABLED             Enable ADX ingestion (default: true)
+  ADX_ENABLED             Enable ADX ingestion (default: false)
   ADX_CLUSTER_URI         ADX cluster URI (required if ADX_ENABLED)
   ADX_DATABASE            ADX database name
-  AZURE_RESOURCE_GROUP    Azure resource group
-  CLICKHOUSE_URL          ClickHouse HTTP endpoint (optional)
-  CLICKHOUSE_USER         ClickHouse username
-  CLICKHOUSE_PASSWORD     ClickHouse password
+  AZURE_RESOURCE_GROUP    Azure resource group (for ADX start/stop)
+  STOP_ADX_AFTER          Stop ADX cluster after run (default: false)
+  CH_ENABLED              Enable ClickHouse ingestion (default: false)
+  CH_URL                  ClickHouse HTTP endpoint (required if CH_ENABLED)
+  CH_USER                 ClickHouse username
+  CH_PASSWORD             ClickHouse password
   MAX_BLOCKS              Max blocks per run (default: 100000)
   BATCH_SIZE              Blocks per micro-batch (default: 500)
   CRYO_CONCURRENCY        cryo max concurrent requests (default: 4)
   CRYO_CHUNK_SIZE         cryo chunk size (default: 500)
   CRYO_RPS                cryo requests per second (default: 30)
-  STOP_ADX_AFTER          Stop ADX cluster after run (default: false)
   FIRST_RUN_LOOKBACK      Blocks to look back on first run (default: 1000)
 """
 import glob as globmod
@@ -41,16 +42,26 @@ import requests as req
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
-ADX_ENABLED = os.environ.get("ADX_ENABLED", "true").lower() == "true"
+
+# ADX target (optional — set ADX_ENABLED=true and provide ADX_CLUSTER_URI)
+ADX_ENABLED = os.environ.get("ADX_ENABLED", "false").lower() == "true"
 ADX_CLUSTER_URI = os.environ.get("ADX_CLUSTER_URI", "")
 ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
-RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
+AZURE_RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
+STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
+
+# ClickHouse target (optional — set CH_ENABLED=true and provide CH_URL)
+CH_ENABLED = os.environ.get("CH_ENABLED", "false").lower() == "true"
+CH_URL = os.environ.get("CH_URL", "")          # e.g. http://host:8123
+CH_USER = os.environ.get("CH_USER", "default")
+CH_PASSWORD = os.environ.get("CH_PASSWORD", "")
+
+# Extraction tuning
 MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS", "100000"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
 CRYO_CONCURRENCY = os.environ.get("CRYO_CONCURRENCY", "4")
 CRYO_CHUNK_SIZE = os.environ.get("CRYO_CHUNK_SIZE", "500")
 CRYO_RPS = os.environ.get("CRYO_RPS", "30")
-STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
 FIRST_RUN_LOOKBACK = int(os.environ.get("FIRST_RUN_LOOKBACK", "1000"))
 
 # Backfill overrides — set these to run a specific block range
@@ -61,11 +72,6 @@ WORKER_ID = os.environ.get("WORKER_ID", "cryo")  # progress key for parallel wor
 # Sidecar mode: loop continuously, sleeping LOOP_SLEEP_SECS between runs
 SIDECAR_MODE = os.environ.get("SIDECAR_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
-
-# ClickHouse dual-ingest (optional — set CLICKHOUSE_URL to enable)
-CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "")  # e.g. http://host:8123
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "etherwurst")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 
 WORK_DIR = "/tmp/cryo-extract"
 
@@ -168,7 +174,7 @@ def ensure_adx_running():
     cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
     result = subprocess.run(
         ["az", "kusto", "cluster", "show", "--name", cluster_name,
-         "--resource-group", RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
+         "--resource-group", AZURE_RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
         capture_output=True, text=True, timeout=60
     )
     state = result.stdout.strip()
@@ -176,9 +182,9 @@ def ensure_adx_running():
     if state == "Stopped":
         print("  Starting ADX cluster...")
         run(["az", "kusto", "cluster", "start", "--name", cluster_name,
-             "--resource-group", RESOURCE_GROUP], timeout=600)
+             "--resource-group", AZURE_RESOURCE_GROUP], timeout=600)
         run(["az", "kusto", "cluster", "wait", "--name", cluster_name,
-             "--resource-group", RESOURCE_GROUP,
+             "--resource-group", AZURE_RESOURCE_GROUP,
              "--custom", "provisioningState=='Succeeded'"], timeout=600)
         print("  ADX cluster started.")
 
@@ -190,7 +196,7 @@ def stop_adx():
     print("  Stopping ADX cluster...")
     subprocess.run(
         ["az", "kusto", "cluster", "stop", "--name", cluster_name,
-         "--resource-group", RESOURCE_GROUP, "--no-wait"],
+         "--resource-group", AZURE_RESOURCE_GROUP, "--no-wait"],
         capture_output=True, text=True, timeout=60
     )
 
@@ -199,15 +205,15 @@ def stop_adx():
 
 def ingest_to_clickhouse(parquet_file, ch_table):
     """Ingest a Parquet file into ClickHouse via HTTP interface."""
-    if not CLICKHOUSE_URL:
+    if not CH_ENABLED:
         return
     with open(parquet_file, "rb") as f:
         resp = _session.post(
-            CLICKHOUSE_URL,
+            CH_URL,
             params={
                 "query": f"INSERT INTO {ch_table} FORMAT Parquet",
-                "user": CLICKHOUSE_USER,
-                "password": CLICKHOUSE_PASSWORD,
+                "user": CH_USER,
+                "password": CH_PASSWORD,
             },
             data=f,
             headers={"Content-Type": "application/octet-stream"},
@@ -219,16 +225,16 @@ def ingest_to_clickhouse(parquet_file, ch_table):
 
 def update_ch_progress(block_num):
     """Update progress in ClickHouse."""
-    if not CLICKHOUSE_URL:
+    if not CH_ENABLED:
         return
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         _session.post(
-            CLICKHOUSE_URL,
+            CH_URL,
             params={
                 "query": f"INSERT INTO etl_progress VALUES('{WORKER_ID}',{block_num},'{ts}')",
-                "user": CLICKHOUSE_USER,
-                "password": CLICKHOUSE_PASSWORD,
+                "user": CH_USER,
+                "password": CH_PASSWORD,
             },
             timeout=30,
         )
@@ -248,11 +254,11 @@ def get_last_ingested_block(client):
         except Exception as e:
             print(f"  Warning: Could not read ADX progress: {e}")
     # Fall back to ClickHouse
-    if CLICKHOUSE_URL:
+    if CH_ENABLED:
         try:
-            resp = _session.get(CLICKHOUSE_URL, params={
+            resp = _session.get(CH_URL, params={
                 "query": f"SELECT max(last_block) FROM etl_progress WHERE dataset = '{WORKER_ID}'",
-                "user": CLICKHOUSE_USER, "password": CLICKHOUSE_PASSWORD,
+                "user": CH_USER, "password": CH_PASSWORD,
             }, timeout=30)
             val = resp.text.strip()
             if val and val != "0":
@@ -331,7 +337,7 @@ def process_batch(batch_start, batch_end, ingest_client):
         tags = []
         if ADX_ENABLED:
             tags.append("ADX")
-        if CLICKHOUSE_URL:
+        if CH_ENABLED:
             tags.append("CH")
         print(f"    {table}: {len(parquet_files)} files ingested → {'+'.join(tags)}")
 
@@ -345,12 +351,12 @@ def main():
     print("═══ ETL (Micro-batch) starting ═══")
     print(f"  Erigon:  {ERIGON_RPC}")
     print(f"  ADX:     {ADX_CLUSTER_URI if ADX_ENABLED else 'disabled'}")
-    print(f"  CH:      {CLICKHOUSE_URL or 'disabled'}")
+    print(f"  CH:      {CH_URL if CH_ENABLED else 'disabled'}")
     print(f"  Batch:   {BATCH_SIZE} blocks")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
 
-    if not ADX_ENABLED and not CLICKHOUSE_URL:
-        print("  ERROR: No ingest target configured (set ADX_ENABLED or CLICKHOUSE_URL)")
+    if not ADX_ENABLED and not CH_URL:
+        print("  ERROR: No ingest target configured (set ADX_ENABLED or CH_ENABLED)")
         sys.exit(1)
 
     wait_for_erigon()

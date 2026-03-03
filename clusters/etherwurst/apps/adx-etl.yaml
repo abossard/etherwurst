@@ -56,11 +56,13 @@ spec:
                   value: "${AZURE_ADX_DATABASE_NAME}"
                 - name: AZURE_RESOURCE_GROUP
                   value: "${AZURE_RESOURCE_GROUP}"
-                - name: CLICKHOUSE_URL
+                - name: CH_ENABLED
+                  value: "true"
+                - name: CH_URL
                   value: "http://clickhouse-ethereum-analytics:8123"
-                - name: CLICKHOUSE_USER
+                - name: CH_USER
                   value: "etherwurst"
-                - name: CLICKHOUSE_PASSWORD
+                - name: CH_PASSWORD
                   value: "etherwurst-ch-2026"
                 - name: MAX_BLOCKS
                   value: "100000"
