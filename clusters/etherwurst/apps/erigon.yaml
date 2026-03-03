@@ -83,7 +83,7 @@ spec:
           - name: SIDECAR_MODE
             value: "true"
           - name: LOOP_SLEEP_SECS
-            value: "1800"
+            value: "60"
           - name: MAX_BLOCKS
             value: "500000"
           - name: BATCH_SIZE

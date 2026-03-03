@@ -94,6 +94,21 @@ def get_chain_head():
     return int(result, 16)
 
 
+def wait_for_erigon(max_wait=300):
+    """Wait for Erigon RPC to become available (sidecar starts before Erigon)."""
+    import urllib3
+    urllib3.disable_warnings()
+    for i in range(max_wait // 5):
+        try:
+            get_chain_head()
+            return
+        except Exception:
+            if i == 0:
+                print("  Waiting for Erigon RPC...")
+            time.sleep(5)
+    raise RuntimeError(f"Erigon RPC not available after {max_wait}s")
+
+
 def cleanup():
     subprocess.run(["rm", "-rf", WORK_DIR], capture_output=True)
 
@@ -237,6 +252,8 @@ def main():
     print(f"  ADX:     {ADX_CLUSTER_URI}")
     print(f"  Batch:   {BATCH_SIZE} blocks")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
+
+    wait_for_erigon()
 
     # Azure CLI login (workload identity uses federated token, not managed identity)
     client_id = os.environ.get("AZURE_CLIENT_ID", "")
