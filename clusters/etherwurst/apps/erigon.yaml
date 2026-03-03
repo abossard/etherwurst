@@ -104,6 +104,10 @@ spec:
             value: "sidecar"
           - name: PYTHONUNBUFFERED
             value: "1"
+          - name: AZURE_CONFIG_DIR
+            value: "/tmp/.azure"
+          - name: HOME
+            value: "/tmp"
         resources:
           requests: { cpu: 500m, memory: 512Mi }
           limits: { cpu: "4", memory: 4Gi }
