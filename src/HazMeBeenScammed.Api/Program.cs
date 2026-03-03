@@ -21,8 +21,13 @@ if (!string.IsNullOrEmpty(erigonUrl))
     builder.Services.AddHttpClient("erigon-rpc", client =>
     {
         client.BaseAddress = new Uri(erigonUrl);
-        client.Timeout = TimeSpan.FromSeconds(60);
+        client.Timeout = TimeSpan.FromSeconds(120);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
+    }).AddStandardResilienceHandler(options =>
+    {
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(120);
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
+        options.Retry.MaxRetryAttempts = 1;
     });
 
     builder.Services.AddHttpClient("blockscout", client =>
