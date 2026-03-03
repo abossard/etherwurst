@@ -50,7 +50,7 @@ var dcrPrometheusName = 'dcr-${dashPrefix}-prom'
 var vnetName = 'vnet-${dashPrefix}'
 var acrName = 'acr${prefix}'
 var aksClusterName = 'aks-${dashPrefix}'
-var openaiAccountName = 'oai-${dashPrefix}'
+var aiFoundryName = 'aif-${dashPrefix}'
 var adxClusterName = 'adx${prefix}'
 var adxDatabaseName = 'ethereum'
 var storageName = 'st${prefix}'
@@ -627,31 +627,45 @@ resource etlContainer 'Microsoft.Storage/storageAccounts/blobServices/containers
 
 // Note: Storage Blob Data Contributor for appIdentity is assigned above as appIdentityStorageRole
 
-// ─── Azure OpenAI (reasoning models, RBAC-only, no keys) ─────────────
+// ─── Azure AI Foundry (Hub + Project, RBAC-only, no keys) ────────────
+// Phase 1: Old OpenAI account removed. Run `azd provision` to detach,
+//   then `az cognitiveservices account delete -n oai-hazscam-r3is7 -g rg-hazscam-gwc`
+// Phase 2: Uncomment the AI Foundry resources below and run `azd provision` again.
+
+var aiFoundryProjectName = '${aiFoundryName}-proj'
 
 var reasoningModels = [
   { name: 'gpt-4o-mini', model: 'gpt-4o-mini', version: '2024-07-18', sku: 'GlobalStandard', capacity: 1 }
 ]
 
-resource openai 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
-  name: openaiAccountName
+resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
+  name: aiFoundryName
   location: location
-  kind: 'OpenAI'
+  kind: 'AIServices'
   sku: { name: 'S0' }
   identity: { type: 'SystemAssigned' }
   properties: {
-    customSubDomainName: openaiAccountName
+    allowProjectManagement: true
+    customSubDomainName: aiFoundryName
     disableLocalAuth: true
     publicNetworkAccess: publicAccess
     networkAcls: { defaultAction: networkDefault }
   }
 }
 
+resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
+  name: aiFoundryProjectName
+  parent: aiFoundry
+  location: location
+  identity: { type: 'SystemAssigned' }
+  properties: {}
+}
+
 @batchSize(1)
-resource openaiDeployments 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = [
+resource aiFoundryDeployments 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = [
   for model in reasoningModels: {
     name: model.name
-    parent: openai
+    parent: aiFoundry
     sku: { name: model.sku, capacity: model.capacity }
     properties: {
       model: { format: 'OpenAI', name: model.model, version: model.version }
@@ -660,9 +674,9 @@ resource openaiDeployments 'Microsoft.CognitiveServices/accounts/deployments@202
 ]
 
 // App identity → OpenAI User (invoke models via RBAC)
-resource appIdentityOpenAIRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(openai.id, appIdentity.id, roleIds.cognitiveServicesOpenAIUser)
-  scope: openai
+resource appIdentityAIFoundryRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(aiFoundry.id, appIdentity.id, roleIds.cognitiveServicesOpenAIUser)
+  scope: aiFoundry
   properties: {
     roleDefinitionId: roleDefs.cognitiveServicesOpenAIUser
     principalId: appIdentity.properties.principalId
@@ -671,9 +685,9 @@ resource appIdentityOpenAIRole 'Microsoft.Authorization/roleAssignments@2022-04-
 }
 
 // Developer → OpenAI User
-resource devOpenAIRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (hasDeveloper) {
-  name: guid(openai.id, developerPrincipalId, roleIds.cognitiveServicesOpenAIUser)
-  scope: openai
+resource devAIFoundryRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (hasDeveloper) {
+  name: guid(aiFoundry.id, developerPrincipalId, roleIds.cognitiveServicesOpenAIUser)
+  scope: aiFoundry
   properties: {
     roleDefinitionId: roleDefs.cognitiveServicesOpenAIUser
     principalId: developerPrincipalId
@@ -828,8 +842,9 @@ output AZURE_CONTAINER_REGISTRY_NAME string = acr.name
 output AZURE_ALB_IDENTITY_CLIENT_ID string = albIdentity.properties.clientId
 output AZURE_APP_IDENTITY_CLIENT_ID string = appIdentity.properties.clientId
 output AZURE_APP_IDENTITY_NAME string = appIdentity.name
-output AZURE_OPENAI_ENDPOINT string = openai.properties.endpoint
-output AZURE_OPENAI_ACCOUNT_NAME string = openai.name
+output AZURE_OPENAI_ENDPOINT string = aiFoundry.properties.endpoint
+output AZURE_OPENAI_ACCOUNT_NAME string = aiFoundry.name
+output AZURE_AI_FOUNDRY_PROJECT_NAME string = aiFoundryProject.name
 output AZURE_VPN_GATEWAY_NAME string = privateNetworking ? vpnGw.name : ''
 output AZURE_STORAGE_ACCOUNT_NAME string = storage.name
 output AZURE_LOG_ANALYTICS_WORKSPACE_ID string = logAnalytics.id

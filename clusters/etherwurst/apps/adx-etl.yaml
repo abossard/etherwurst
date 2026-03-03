@@ -71,5 +71,5 @@ spec:
                 - name: PYTHONUNBUFFERED
                   value: "1"
               resources:
-                requests: { cpu: 250m, memory: 512Mi }
+                requests: { cpu: 100m, memory: 256Mi }
                 limits: { cpu: "2", memory: 2Gi }

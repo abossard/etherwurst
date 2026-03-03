@@ -1,0 +1,13 @@
+# VPA for monitoring namespace (recommendation-only mode)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-eth-metrics
+  namespace: monitoring
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: eth-metrics
+  updatePolicy:
+    updateMode: "Off"

@@ -57,3 +57,13 @@ spec:
   type: default
   interval: 1h
   url: https://charts.jetstack.io
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: fairwinds-stable
+  namespace: flux-system
+spec:
+  type: default
+  interval: 1h
+  url: https://charts.fairwinds.com/stable

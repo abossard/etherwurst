@@ -1,0 +1,92 @@
+# VPA resources for ethereum namespace workloads (recommendation-only mode)
+# Review recommendations with: kubectl get vpa -n ethereum -o yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-erigon
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: erigon
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-lighthouse
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: lighthouse
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-hazmebeenscammed-api
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hazmebeenscammed-api
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-hazmebeenscammed-web
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hazmebeenscammed-web
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-otterscan
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: otterscan
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-clickhouse
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: chi-ethereum-analytics-analytics-0-0
+  updatePolicy:
+    updateMode: "Off"
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-etherwurst-gateway
+  namespace: ethereum
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: etherwurst-gateway-nginx
+  updatePolicy:
+    updateMode: "Off"

@@ -34,4 +34,5 @@ kind: Namespace
 metadata:
   name: goldilocks
   labels:
+    app.kubernetes.io/part-of: etherwurst
     goldilocks.fairwinds.com/enabled: "true"

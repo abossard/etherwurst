@@ -1,0 +1,13 @@
+apiVersion: azmonitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ethereum-metrics-exporter
+  namespace: monitoring
+spec:
+  podMetricsEndpoints:
+    - port: http
+      interval: 30s
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ethereum-metrics-exporter
+      app.kubernetes.io/instance: ethereum-metrics-exporter
