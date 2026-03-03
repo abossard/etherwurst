@@ -53,6 +53,10 @@ START_BLOCK = os.environ.get("START_BLOCK")  # explicit start (overrides progres
 END_BLOCK = os.environ.get("END_BLOCK")      # explicit end (overrides chain head)
 WORKER_ID = os.environ.get("WORKER_ID", "cryo")  # progress key for parallel workers
 
+# Sidecar mode: loop continuously, sleeping LOOP_SLEEP_SECS between runs
+SIDECAR_MODE = os.environ.get("SIDECAR_MODE", "false").lower() == "true"
+LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
+
 WORK_DIR = "/tmp/cryo-extract"
 
 # cryo dataset → ADX table mapping
@@ -321,5 +325,20 @@ def main():
         stop_adx()
 
 
-if __name__ == "__main__":
+def run_once():
+    """Single ETL run — used by both CronJob and sidecar loop."""
     main()
+
+
+if __name__ == "__main__":
+    if SIDECAR_MODE:
+        print("═══ Sidecar mode: looping continuously ═══")
+        while True:
+            try:
+                main()
+            except Exception as e:
+                print(f"Run failed: {e}", file=sys.stderr)
+            print(f"  Sleeping {LOOP_SLEEP_SECS}s before next run...")
+            time.sleep(LOOP_SLEEP_SECS)
+    else:
+        main()

@@ -61,3 +61,57 @@ spec:
                 - key: workload-type
                   operator: In
                   values: ["ethereum"]
+    # ── Workload identity for ETL sidecar ──
+    serviceAccount:
+      create: false
+      name: adx-etl-sa
+    podLabels:
+      azure.workload.identity/use: "true"
+    # ── ETL sidecar: localhost RPC for fast backfill ──
+    extraContainers:
+      - name: etl-sidecar
+        image: ${ACR_LOGIN_SERVER}/adx-etl:latest
+        imagePullPolicy: Always
+        env:
+          - name: ERIGON_RPC_URL
+            value: "http://localhost:8545"
+          - name: ADX_CLUSTER_URI
+            value: "${AZURE_ADX_CLUSTER_URI}"
+          - name: ADX_DATABASE
+            value: "${AZURE_ADX_DATABASE_NAME}"
+          - name: AZURE_RESOURCE_GROUP
+            value: "${AZURE_RESOURCE_GROUP}"
+          - name: SIDECAR_MODE
+            value: "true"
+          - name: LOOP_SLEEP_SECS
+            value: "1800"
+          - name: MAX_BLOCKS
+            value: "500000"
+          - name: BATCH_SIZE
+            value: "2000"
+          - name: CRYO_CONCURRENCY
+            value: "32"
+          - name: CRYO_CHUNK_SIZE
+            value: "2000"
+          - name: CRYO_RPS
+            value: "500"
+          - name: STOP_ADX_AFTER
+            value: "false"
+          - name: FIRST_RUN_LOOKBACK
+            value: "25000000"
+          - name: START_BLOCK
+            value: "0"
+          - name: WORKER_ID
+            value: "sidecar"
+          - name: PYTHONUNBUFFERED
+            value: "1"
+        resources:
+          requests: { cpu: 500m, memory: 512Mi }
+          limits: { cpu: "4", memory: 4Gi }
+        volumeMounts:
+          - name: etl-temp
+            mountPath: /tmp/cryo-extract
+    extraVolumes:
+      - name: etl-temp
+        emptyDir:
+          sizeLimit: 10Gi
