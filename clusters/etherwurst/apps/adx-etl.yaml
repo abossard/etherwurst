@@ -52,14 +52,12 @@ spec:
                   value: "${AZURE_ADX_CLUSTER_URI}"
                 - name: ADX_DATABASE
                   value: "${AZURE_ADX_DATABASE_NAME}"
-                - name: STORAGE_ACCOUNT_NAME
-                  value: "${AZURE_STORAGE_ACCOUNT_NAME}"
-                - name: STORAGE_CONTAINER
-                  value: "ethereum-etl"
                 - name: AZURE_RESOURCE_GROUP
                   value: "${AZURE_RESOURCE_GROUP}"
                 - name: MAX_BLOCKS
                   value: "100000"
+                - name: BATCH_SIZE
+                  value: "500"
                 - name: CRYO_CONCURRENCY
                   value: "4"
                 - name: CRYO_CHUNK_SIZE
@@ -73,5 +71,5 @@ spec:
                 - name: PYTHONUNBUFFERED
                   value: "1"
               resources:
-                requests: { cpu: 250m, memory: 1Gi }
-                limits: { cpu: "2", memory: 4Gi }
+                requests: { cpu: 250m, memory: 512Mi }
+                limits: { cpu: "2", memory: 2Gi }
