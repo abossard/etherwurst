@@ -55,7 +55,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }

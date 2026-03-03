@@ -21,7 +21,7 @@ if (!string.IsNullOrEmpty(erigonUrl))
     builder.Services.AddHttpClient("erigon-rpc", client =>
     {
         client.BaseAddress = new Uri(erigonUrl);
-        client.Timeout = TimeSpan.FromSeconds(30);
+        client.Timeout = TimeSpan.FromSeconds(60);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
     });
 
