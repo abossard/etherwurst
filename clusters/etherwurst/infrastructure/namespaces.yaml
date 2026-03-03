@@ -32,20 +32,6 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cert-manager
-  labels:
-    goldilocks.fairwinds.com/enabled: "true"
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: nginx-gateway
-  labels:
-    goldilocks.fairwinds.com/enabled: "true"
----
-apiVersion: v1
-kind: Namespace
-metadata:
   name: goldilocks
   labels:
     goldilocks.fairwinds.com/enabled: "true"
