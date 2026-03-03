@@ -1,0 +1,43 @@
+# ─── Container Insights Log Filtering ──────────────────────────────────────────
+# Only collect logs from the ethereum namespace (our source code).
+# Everything else (blockscout, kube-system, monitoring, etc.) is excluded.
+#
+# Savings: ~99% reduction (57.5 GB/week → ~0.01 GB/week).
+# See: https://learn.microsoft.com/en-us/azure/azure-monitor/containers/container-insights-data-collection-filter
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: container-azm-ms-agentconfig
+  namespace: kube-system
+data:
+  schema-version: v1
+  config-version: ver2
+  log-data-collection-settings: |-
+    [log_collection_settings]
+
+    [log_collection_settings.stdout]
+    enabled = true
+    exclude_namespaces = ["blockscout", "kube-system", "gatekeeper-system", "monitoring", "flux-system", "cert-manager", "nginx-gateway", "goldilocks", "kube-node-lease", "kube-public"]
+
+    [log_collection_settings.stderr]
+    enabled = true
+    exclude_namespaces = ["blockscout", "kube-system", "gatekeeper-system", "monitoring", "flux-system", "cert-manager", "nginx-gateway", "goldilocks", "kube-node-lease", "kube-public"]
+
+    [log_collection_settings.env_var]
+    enabled = false
+
+    [log_collection_settings.enrich_container_logs]
+    enabled = false
+  prometheus-data-collection-settings: |-
+    [prometheus_data_collection_settings.cluster]
+    interval = "5m"
+
+    [prometheus_data_collection_settings.node]
+    interval = "5m"
+  metric_collection_settings: |-
+    [metric_collection_settings.collect_kube_system_pv_metrics]
+    enabled = false
+  agent-settings: |-
+    [agent_settings.fbit_config]
+    log_flush_interval_secs = "30"
+

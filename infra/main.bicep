@@ -445,7 +445,66 @@ resource albFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
   }
 }
 
-// ─── Prometheus DCR associations ─────────────────────────────────────
+// ─── Container Insights DCR (ContainerLogV2, namespace filtering) ────
+
+var dcrContainerInsightsName = 'dcr-${dashPrefix}-ci'
+
+resource dcrContainerInsights 'Microsoft.Insights/dataCollectionRules@2023-03-11' = {
+  name: dcrContainerInsightsName
+  location: location
+  kind: 'Linux'
+  properties: {
+    dataSources: {
+      extensions: [
+        {
+          name: 'ContainerInsightsExtension'
+          streams: ['Microsoft-ContainerLogV2']
+          extensionSettings: {
+            dataCollectionSettings: {
+              interval: '5m'
+              namespaceFilteringMode: 'Include'
+              namespaces: ['ethereum']
+              enableContainerLogV2: true
+            }
+          }
+          extensionName: 'ContainerInsights'
+        }
+      ]
+      performanceCounters: [
+        {
+          name: 'PerfCounterDataSource'
+          streams: ['Microsoft-Perf']
+          samplingFrequencyInSeconds: 300
+          counterSpecifiers: [
+            '\\Processor(_Total)\\% Processor Time'
+            '\\Memory\\Available Bytes'
+            '\\Memory\\% Used Memory'
+          ]
+        }
+      ]
+    }
+    destinations: {
+      logAnalytics: [
+        {
+          name: 'ContainerInsightsWorkspace'
+          workspaceResourceId: logAnalytics.id
+        }
+      ]
+    }
+    dataFlows: [
+      {
+        destinations: ['ContainerInsightsWorkspace']
+        streams: ['Microsoft-ContainerLogV2']
+      }
+      {
+        destinations: ['ContainerInsightsWorkspace']
+        streams: ['Microsoft-Perf']
+      }
+    ]
+  }
+}
+
+// ─── DCR associations ────────────────────────────────────────────────
 
 resource dceAssociation 'Microsoft.Insights/dataCollectionRuleAssociations@2024-03-11' = {
   name: 'configurationAccessEndpoint'
@@ -457,6 +516,12 @@ resource dcrAssociation 'Microsoft.Insights/dataCollectionRuleAssociations@2024-
   name: 'dcra-prometheus'
   scope: aks
   properties: { dataCollectionRuleId: dcrPrometheus.id }
+}
+
+resource dcrCiAssociation 'Microsoft.Insights/dataCollectionRuleAssociations@2024-03-11' = {
+  name: 'dcra-container-insights'
+  scope: aks
+  properties: { dataCollectionRuleId: dcrContainerInsights.id }
 }
 
 // ─── Developer RBAC (isDeveloper=true) ───────────────────────────────
