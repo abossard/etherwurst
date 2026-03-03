@@ -127,7 +127,7 @@ public class ScamAnalyzerTests
     // Stub analytics that always returns clean transactions
     private sealed class StubBlockchainAnalytics : IBlockchainAnalyticsPort
     {
-        public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+        public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
             WalletAddress address,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -146,12 +146,12 @@ public class ScamAnalyzerTests
             );
         }
 
-        public async Task<TransactionInfo?> GetTransactionAsync(
+        public async Task<TransactionDetail?> GetTransactionDetailAsync(
             TransactionHash hash,
             CancellationToken cancellationToken = default)
         {
             await Task.Yield();
-            return new TransactionInfo(
+            var tx = new TransactionInfo(
                 Hash: hash.Value,
                 From: "0x1111111111111111111111111111111111111111",
                 To: "0x2222222222222222222222222222222222222222",
@@ -163,34 +163,15 @@ public class ScamAnalyzerTests
                 Timestamp: DateTimeOffset.UtcNow.AddHours(-2),
                 Status: "Success"
             );
+            return new TransactionDetail(tx, []);
         }
 
-        public async Task<ContractInfo?> GetContractInfoAsync(
+        public async Task<ContractAssessment?> AssessContractAsync(
             string address,
             CancellationToken cancellationToken = default)
         {
             await Task.Yield();
             return null;
-        }
-
-        public async Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default)
-        {
-            await Task.Yield();
-            return "0x";
-        }
-
-        public async Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default)
-        {
-            await Task.Yield();
-            return "0x" + new string('0', 64);
-        }
-
-        public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-            TransactionHash hash,
-            CancellationToken cancellationToken = default)
-        {
-            await Task.Yield();
-            return new TransactionReceiptInfo(hash.Value, "0x1", []);
         }
     }
 
@@ -198,7 +179,7 @@ public class ScamAnalyzerTests
     {
         private const string RootWallet = "0x742d35cc6634c0532925a3b844bc454e4438f44e";
 
-        public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+        public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
             WalletAddress address,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -296,19 +277,7 @@ public class ScamAnalyzerTests
             }
         }
 
-        public Task<TransactionInfo?> GetTransactionAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<TransactionInfo?>(null);
-
-        public Task<ContractInfo?> GetContractInfoAsync(string address, CancellationToken cancellationToken = default) =>
-            Task.FromResult<ContractInfo?>(new ContractInfo(address, null, false, true, null));
-
-        public Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>("0x" + new string('f', 180));
-
-        public Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>("0x0000000000000000000000001111111111111111111111111111111111111111");
-
-        public Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(TransactionHash hash, CancellationToken cancellationToken = default)
+        public Task<TransactionDetail?> GetTransactionDetailAsync(TransactionHash hash, CancellationToken cancellationToken = default)
         {
             var logs = hash.Value.EndsWith("a", StringComparison.OrdinalIgnoreCase)
                 ? new List<TransactionLogInfo>
@@ -323,11 +292,33 @@ public class ScamAnalyzerTests
                         ],
                         Data: "0x0")
                 }
-                : [];
+                : new List<TransactionLogInfo>();
 
-            return Task.FromResult<TransactionReceiptInfo?>(
-                new TransactionReceiptInfo(hash.Value, "0x1", logs));
+            var tx = new TransactionInfo(
+                Hash: hash.Value,
+                From: RootWallet,
+                To: "0x9999999999999999999999999999999999999999",
+                ValueEth: 0m,
+                TokenSymbol: "",
+                TokenAmount: 0m,
+                IsContractInteraction: true,
+                ContractName: null,
+                Timestamp: DateTimeOffset.UtcNow,
+                Status: "Success");
+
+            return Task.FromResult<TransactionDetail?>(new TransactionDetail(tx, logs));
         }
+
+        public Task<ContractAssessment?> AssessContractAsync(string address, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ContractAssessment?>(new ContractAssessment(
+                Address: address,
+                Name: null,
+                IsVerified: false,
+                IsProxy: true,
+                ProxyImplementation: "0x1111111111111111111111111111111111111111",
+                HasSuspiciouslyShortBytecode: true,
+                BytecodeLength: 180,
+                AbiFragment: null));
     }
 }
 

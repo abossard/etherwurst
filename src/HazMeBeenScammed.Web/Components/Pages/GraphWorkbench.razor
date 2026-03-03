@@ -329,4 +329,6 @@
         DateTimeOffset FirstSeen,
         DateTimeOffset LastSeen,
         string DominantToken);
+
+    private record BackendsResponse(string[] Available, string Default);
 }

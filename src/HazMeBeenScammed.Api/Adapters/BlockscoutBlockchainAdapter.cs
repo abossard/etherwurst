@@ -9,7 +9,7 @@ namespace HazMeBeenScammed.Api.Adapters;
 /// <summary>
 /// IBlockchainAnalyticsPort backed by Blockscout REST API v2.
 /// Provides enriched data (decoded method names, token transfers, address labels).
-/// Falls back to Erigon for live-state operations (bytecode, storage).
+/// Falls back to Erigon for live-state operations only when needed.
 /// </summary>
 public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
 {
@@ -29,7 +29,7 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
 
     // ─── IBlockchainAnalyticsPort ────────────────────────────────────
 
-    public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
         WalletAddress address,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -77,17 +77,33 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
         _logger.LogInformation("Blockscout: fetched {Count} transactions for {Address}", yielded, address.Value);
     }
 
-    public async Task<TransactionInfo?> GetTransactionAsync(
+    public async Task<TransactionDetail?> GetTransactionDetailAsync(
         TransactionHash hash,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Blockscout: fetching transaction {Hash}", hash.Value);
+        _logger.LogInformation("Blockscout: fetching transaction detail {Hash}", hash.Value);
 
         try
         {
             var tx = await _client.GetFromJsonAsync<BsTransaction>(
                 $"/api/v2/transactions/{hash.Value}", cancellationToken);
-            return tx != null ? MapTransaction(tx) : null;
+            if (tx == null) return null;
+
+            var txInfo = MapTransaction(tx);
+
+            // Fetch logs
+            var logsResponse = await _client.GetFromJsonAsync<BsTransactionLogsResponse>(
+                $"/api/v2/transactions/{hash.Value}/logs", cancellationToken);
+
+            var logs = logsResponse?.Items?.Select(l => new TransactionLogInfo(
+                Address: l.Address?.Hash ?? "",
+                Topics: new List<string>(new[]
+                    { l.FirstTopic, l.SecondTopic, l.ThirdTopic, l.FourthTopic }
+                    .Where(t => t != null)!),
+                Data: l.Data ?? "0x"
+            )).ToList() ?? new List<TransactionLogInfo>();
+
+            return new TransactionDetail(txInfo, logs);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -95,36 +111,44 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Blockscout: failed fetching tx {Hash}, trying fallback", hash.Value);
+            _logger.LogWarning(ex, "Blockscout: failed fetching tx detail {Hash}, trying fallback", hash.Value);
             return _fallback != null
-                ? await _fallback.GetTransactionAsync(hash, cancellationToken)
+                ? await _fallback.GetTransactionDetailAsync(hash, cancellationToken)
                 : null;
         }
     }
 
-    public async Task<ContractInfo?> GetContractInfoAsync(
+    public async Task<ContractAssessment?> AssessContractAsync(
         string address, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Blockscout: fetching contract info for {Address}", address);
+        _logger.LogInformation("Blockscout: assessing contract {Address}", address);
 
         try
         {
-            // First check if it's a contract via the address endpoint
+            // Check if it's a contract
             var addrInfo = await _client.GetFromJsonAsync<BsAddress>(
                 $"/api/v2/addresses/{address}", cancellationToken);
 
             if (addrInfo == null || !addrInfo.IsContract)
                 return null;
 
-            // Fetch smart contract details
-            var sc = await _client.GetFromJsonAsync<BsSmartContract>(
-                $"/api/v2/smart-contracts/{address}", cancellationToken);
+            // Fetch smart contract details — Blockscout already knows proxy/verified/ABI
+            BsSmartContract? sc = null;
+            try
+            {
+                sc = await _client.GetFromJsonAsync<BsSmartContract>(
+                    $"/api/v2/smart-contracts/{address}", cancellationToken);
+            }
+            catch { /* smart-contracts endpoint may 404 for unverified */ }
 
-            return new ContractInfo(
+            return new ContractAssessment(
                 Address: address,
                 Name: sc?.Name ?? addrInfo.Name,
                 IsVerified: sc?.IsVerified ?? false,
                 IsProxy: sc?.IsProxy ?? false,
+                ProxyImplementation: null, // Blockscout doesn't expose impl address directly in v2
+                HasSuspiciouslyShortBytecode: false, // Would need fallback for bytecode length
+                BytecodeLength: 0,
                 AbiFragment: sc?.Abi != null ? TruncateAbi(sc.Abi) : null);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -133,62 +157,9 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Blockscout: contract info failed for {Address}, trying fallback", address);
+            _logger.LogWarning(ex, "Blockscout: contract assessment failed for {Address}, trying fallback", address);
             return _fallback != null
-                ? await _fallback.GetContractInfoAsync(address, cancellationToken)
-                : null;
-        }
-    }
-
-    public async Task<string?> GetBytecodeAsync(
-        string address, CancellationToken cancellationToken = default)
-    {
-        // Live state query — delegate to Erigon
-        if (_fallback != null)
-            return await _fallback.GetBytecodeAsync(address, cancellationToken);
-        return null;
-    }
-
-    public async Task<string?> GetStorageAtAsync(
-        string address, string slot, CancellationToken cancellationToken = default)
-    {
-        // Live state query — delegate to Erigon
-        if (_fallback != null)
-            return await _fallback.GetStorageAtAsync(address, slot, cancellationToken);
-        return null;
-    }
-
-    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-        TransactionHash hash, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Blockscout: fetching logs for {Hash}", hash.Value);
-
-        try
-        {
-            var logsResponse = await _client.GetFromJsonAsync<BsTransactionLogsResponse>(
-                $"/api/v2/transactions/{hash.Value}/logs", cancellationToken);
-
-            if (logsResponse?.Items == null)
-                return null;
-
-            var logs = logsResponse.Items.Select(l => new TransactionLogInfo(
-                Address: l.Address?.Hash ?? "",
-                Topics: new List<string>(new[]
-                    { l.FirstTopic, l.SecondTopic, l.ThirdTopic, l.FourthTopic }
-                    .Where(t => t != null)!),
-                Data: l.Data ?? "0x"
-            )).ToList();
-
-            return new TransactionReceiptInfo(
-                TransactionHash: hash.Value,
-                Status: "0x1", // Blockscout only indexes successful receipts typically
-                Logs: logs);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Blockscout: logs failed for {Hash}, trying fallback", hash.Value);
-            return _fallback != null
-                ? await _fallback.GetTransactionReceiptAsync(hash, cancellationToken)
+                ? await _fallback.AssessContractAsync(address, cancellationToken)
                 : null;
         }
     }

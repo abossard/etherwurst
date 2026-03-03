@@ -70,7 +70,7 @@ public class WalletGraphServiceTests
     {
         private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-        public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+        public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
             WalletAddress address,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -122,19 +122,10 @@ public class WalletGraphServiceTests
             }
         }
 
-        public Task<TransactionInfo?> GetTransactionAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<TransactionInfo?>(null);
+        public Task<TransactionDetail?> GetTransactionDetailAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TransactionDetail?>(null);
 
-        public Task<ContractInfo?> GetContractInfoAsync(string address, CancellationToken cancellationToken = default) =>
-            Task.FromResult<ContractInfo?>(null);
-
-        public Task<string?> GetBytecodeAsync(string address, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>("0x");
-
-        public Task<string?> GetStorageAtAsync(string address, string slot, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>("0x" + new string('0', 64));
-
-        public Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<TransactionReceiptInfo?>(new TransactionReceiptInfo(hash.Value, "0x1", []));
+        public Task<ContractAssessment?> AssessContractAsync(string address, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ContractAssessment?>(null);
     }
 }

@@ -1,65 +1,63 @@
 -- ClickHouse schema for Ethereum blockchain analytics
+-- Schema matches cryo (Rust) Parquet output with --hex flag
 -- Applied to: clickhouse-ethereum-analytics service in ethereum namespace
 -- Engine: ReplacingMergeTree (deduplicates on ORDER BY key)
 
+-- Drop old mismatched tables
+DROP TABLE IF EXISTS blocks;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS logs;
+
 CREATE TABLE IF NOT EXISTS blocks (
-    number UInt64,
-    hash String,
-    parent_hash String,
-    nonce String,
-    sha3_uncles String,
-    miner String,
-    difficulty String,
-    total_difficulty String,
-    size UInt64,
-    extra_data String,
-    gas_limit UInt64,
+    block_number UInt64,
+    block_hash String,
+    timestamp UInt32,
+    author String,
     gas_used UInt64,
-    timestamp DateTime,
-    transaction_count UInt32,
-    base_fee_per_gas UInt64,
-    withdrawals_root String,
-    blob_gas_used UInt64,
-    excess_blob_gas UInt64
+    extra_data String,
+    base_fee_per_gas Nullable(UInt64),
+    chain_id UInt64
 ) ENGINE = ReplacingMergeTree()
-ORDER BY number;
+ORDER BY block_number;
 
 CREATE TABLE IF NOT EXISTS transactions (
-    hash String,
-    nonce UInt64,
-    block_hash String,
     block_number UInt64,
-    transaction_index UInt32,
+    transaction_index UInt64,
+    transaction_hash String,
+    nonce UInt64,
     from_address String,
-    to_address String,
-    value String,
-    gas UInt64,
-    gas_price UInt64,
+    to_address Nullable(String),
+    value_binary Nullable(String),
+    value_string Nullable(String),
+    value_f64 Nullable(Float64),
     input String,
-    block_timestamp DateTime,
-    receipt_cumulative_gas_used UInt64,
-    receipt_gas_used UInt64,
-    receipt_contract_address String,
-    receipt_status UInt8,
-    receipt_effective_gas_price UInt64,
-    max_fee_per_gas UInt64,
-    max_priority_fee_per_gas UInt64,
-    transaction_type UInt8,
-    max_fee_per_blob_gas UInt64,
-    blob_versioned_hashes Array(String)
+    gas_limit UInt64,
+    gas_used UInt64,
+    gas_price Nullable(UInt64),
+    transaction_type Nullable(UInt32),
+    max_priority_fee_per_gas Nullable(UInt64),
+    max_fee_per_gas Nullable(UInt64),
+    success UInt8,
+    n_input_bytes UInt32,
+    n_input_zero_bytes UInt32,
+    n_input_nonzero_bytes UInt32,
+    chain_id UInt64
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (block_number, transaction_index);
 
 CREATE TABLE IF NOT EXISTS logs (
+    block_number UInt64,
+    transaction_index UInt32,
     log_index UInt32,
     transaction_hash String,
-    transaction_index UInt32,
-    block_hash String,
-    block_number UInt64,
     address String,
+    topic0 Nullable(String),
+    topic1 Nullable(String),
+    topic2 Nullable(String),
+    topic3 Nullable(String),
     data String,
-    topics Array(String),
-    block_timestamp DateTime
+    n_data_bytes UInt32,
+    chain_id UInt64
 ) ENGINE = ReplacingMergeTree()
 ORDER BY (block_number, log_index);
 
