@@ -41,7 +41,7 @@ public sealed class WalletGraphService(IBlockchainAnalyticsPort blockchain) : IW
             }
 
             var processedForWallet = 0;
-            await foreach (var tx in blockchain.GetTransactionsForWalletAsync(new WalletAddress(current), cancellationToken))
+            await foreach (var tx in blockchain.GetWalletActivityAsync(new WalletAddress(current), cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 processedForWallet++;

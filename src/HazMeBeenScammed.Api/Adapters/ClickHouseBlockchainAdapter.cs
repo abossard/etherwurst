@@ -12,7 +12,7 @@ namespace HazMeBeenScammed.Api.Adapters;
 /// <summary>
 /// IBlockchainAnalyticsPort backed by ClickHouse for fast analytical queries
 /// on pre-indexed Ethereum data. Falls through to Erigon RPC for operations
-/// that require live node access (bytecode, storage).
+/// that require live node access (contract assessment, transaction detail).
 /// </summary>
 public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 {
@@ -30,7 +30,7 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
         WalletAddress address,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -64,11 +64,11 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
         _logger.LogInformation("ClickHouse: finished wallet query for {Address}", address.Value);
     }
 
-    public async Task<TransactionInfo?> GetTransactionAsync(
+    public async Task<TransactionDetail?> GetTransactionDetailAsync(
         TransactionHash hash,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("ClickHouse: fetching transaction {Hash}", hash.Value);
+        _logger.LogInformation("ClickHouse: fetching transaction detail {Hash}", hash.Value);
 
         const string sql = """
             SELECT
@@ -89,54 +89,34 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
 
         if (await reader.ReadAsync(cancellationToken))
-            return MapFromReader(reader);
+        {
+            var tx = MapFromReader(reader);
+            // ClickHouse doesn't store receipt logs — delegate to fallback for logs
+            if (_fallback != null)
+            {
+                var detail = await _fallback.GetTransactionDetailAsync(hash, cancellationToken);
+                if (detail != null)
+                    return new TransactionDetail(tx, detail.Logs);
+            }
+            return new TransactionDetail(tx, []);
+        }
 
         // Fall through to live node if not indexed yet
         if (_fallback != null)
         {
             _logger.LogInformation("ClickHouse: tx not found, falling back to Erigon for {Hash}", hash.Value);
-            return await _fallback.GetTransactionAsync(hash, cancellationToken);
+            return await _fallback.GetTransactionDetailAsync(hash, cancellationToken);
         }
 
         return null;
     }
 
-    public async Task<ContractInfo?> GetContractInfoAsync(
+    public async Task<ContractAssessment?> AssessContractAsync(
         string address, CancellationToken cancellationToken = default)
     {
-        // Contract metadata is best served by Blockscout/Erigon
+        // Contract assessment needs live node + metadata — always delegate
         if (_fallback != null)
-            return await _fallback.GetContractInfoAsync(address, cancellationToken);
-
-        return null;
-    }
-
-    public async Task<string?> GetBytecodeAsync(
-        string address, CancellationToken cancellationToken = default)
-    {
-        // Live node operation — always delegate
-        if (_fallback != null)
-            return await _fallback.GetBytecodeAsync(address, cancellationToken);
-
-        return null;
-    }
-
-    public async Task<string?> GetStorageAtAsync(
-        string address, string slot, CancellationToken cancellationToken = default)
-    {
-        // Live node operation — always delegate
-        if (_fallback != null)
-            return await _fallback.GetStorageAtAsync(address, slot, cancellationToken);
-
-        return null;
-    }
-
-    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-        TransactionHash hash, CancellationToken cancellationToken = default)
-    {
-        // Receipts/logs are best served by the live node
-        if (_fallback != null)
-            return await _fallback.GetTransactionReceiptAsync(hash, cancellationToken);
+            return await _fallback.AssessContractAsync(address, cancellationToken);
 
         return null;
     }

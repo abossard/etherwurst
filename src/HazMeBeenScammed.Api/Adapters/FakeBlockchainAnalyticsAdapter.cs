@@ -9,7 +9,6 @@ namespace HazMeBeenScammed.Api.Adapters;
 /// <summary>
 /// Fake implementation of IBlockchainAnalyticsPort that returns fabricated data.
 /// This allows the application to run and be demonstrated without a real blockchain connection.
-/// Replace with a real adapter (Etherscan, Blockscout, etc.) for production use.
 /// </summary>
 public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
 {
@@ -34,7 +33,7 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
     private static readonly string[] TokenSymbols =
         ["USDC", "USDT", "WETH", "DAI", "SHIB", "PEPE", "SCAMTOKEN", "FAKEUSDC"];
 
-    public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
         WalletAddress address,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -50,21 +49,24 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         }
     }
 
-    public async Task<TransactionInfo?> GetTransactionAsync(
+    public async Task<TransactionDetail?> GetTransactionDetailAsync(
         TransactionHash hash,
         CancellationToken cancellationToken = default)
     {
         await Task.Delay(15, cancellationToken);
         var random = CreateDeterministicRandom(hash.Value);
 
-        return GenerateFakeTransaction(
+        var tx = GenerateFakeTransaction(
             "0x" + Convert.ToHexString(GenerateRandomBytes(random, 20)).ToLowerInvariant(),
             DateTimeOffset.UtcNow.AddHours(-random.Next(1, 72)),
             random,
             hash.Value);
+
+        var logs = GenerateFakeLogs(hash.Value);
+        return new TransactionDetail(tx, logs);
     }
 
-    public async Task<ContractInfo?> GetContractInfoAsync(
+    public async Task<ContractAssessment?> AssessContractAsync(
         string address,
         CancellationToken cancellationToken = default)
     {
@@ -74,84 +76,42 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
         if (random.Next(3) == 0) return null; // 1/3 chance not a contract
 
         var isVerified = random.Next(2) == 0;
-        return new ContractInfo(
+        var isProxy = random.Next(4) == 0;
+        var bytecodeLength = random.Next(150, 360);
+
+        return new ContractAssessment(
             Address: address,
             Name: isVerified ? KnownContracts[random.Next(KnownContracts.Length)] : null,
             IsVerified: isVerified,
-            IsProxy: random.Next(4) == 0,
+            IsProxy: isProxy,
+            ProxyImplementation: isProxy ? DeriveAddress(address, 555) : null,
+            HasSuspiciouslyShortBytecode: bytecodeLength < 130,
+            BytecodeLength: bytecodeLength,
             AbiFragment: isVerified ? "transfer(address,uint256)" : null
         );
     }
 
-    public async Task<string?> GetBytecodeAsync(
-        string address,
-        CancellationToken cancellationToken = default)
+    private static List<TransactionLogInfo> GenerateFakeLogs(string txHash)
     {
-        await Task.Delay(5, cancellationToken);
-        var random = CreateDeterministicRandom(address + ":bytecode");
-        var isContract = random.Next(10) < 6;
-        if (!isContract)
-        {
-            return "0x";
-        }
-
-        var bytes = GenerateRandomBytes(random, random.Next(150, 360));
-        return "0x" + Convert.ToHexString(bytes).ToLowerInvariant();
-    }
-
-    public async Task<string?> GetStorageAtAsync(
-        string address,
-        string slot,
-        CancellationToken cancellationToken = default)
-    {
-        await Task.Delay(5, cancellationToken);
-        var random = CreateDeterministicRandom(address + ":" + slot);
-
-        // Return EIP-1967-like non-zero slot for some addresses to simulate proxy implementation pointers.
-        if (random.Next(10) < 3)
-        {
-            var impl = DeriveAddress(address, 555).Replace("0x", "", StringComparison.OrdinalIgnoreCase);
-            return "0x" + new string('0', 24) + impl;
-        }
-
-        return "0x" + new string('0', 64);
-    }
-
-    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-        TransactionHash hash,
-        CancellationToken cancellationToken = default)
-    {
-        await Task.Delay(6, cancellationToken);
-        var random = CreateDeterministicRandom(hash.Value + ":receipt");
-
+        var random = CreateDeterministicRandom(txHash + ":receipt");
         var logs = new List<TransactionLogInfo>();
         var topicCount = random.Next(0, 3);
         for (var i = 0; i < topicCount; i++)
         {
             var topics = new List<string>();
             if (random.Next(2) == 0)
-            {
-                // ERC20 Transfer
                 topics.Add("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
-            }
             else
-            {
-                // ERC20 Approval
                 topics.Add("0x8c5be1e5ebec7d5bd14f714f3a5a2f8f3ecf6f6c7d8b9d5f9c4a1c6f0f8b7c3");
-            }
             topics.Add("0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant());
             topics.Add("0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant());
 
             logs.Add(new TransactionLogInfo(
-                Address: DeriveAddress(hash.Value, i + 1),
+                Address: DeriveAddress(txHash, i + 1),
                 Topics: topics,
                 Data: "0x" + Convert.ToHexString(GenerateRandomBytes(random, 32)).ToLowerInvariant()));
         }
-
-        return new TransactionReceiptInfo(
-            TransactionHash: hash.Value,
-            Status: random.Next(10) == 0 ? "0x0" : "0x1",
-            Logs: logs);
+        return logs;
     }
 
     private static IReadOnlyList<TransactionInfo> GenerateDeterministicNeighborhoodTransactions(string wallet)

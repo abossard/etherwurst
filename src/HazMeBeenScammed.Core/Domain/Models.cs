@@ -66,6 +66,30 @@ public record TransactionReceiptInfo(
 );
 
 /// <summary>
+/// A single transaction enriched with its receipt logs.
+/// Merges transaction + receipt into one use-case-oriented type.
+/// </summary>
+public record TransactionDetail(
+    TransactionInfo Transaction,
+    IReadOnlyList<TransactionLogInfo> Logs
+);
+
+/// <summary>
+/// Use-case-oriented assessment of a contract address.
+/// Produced by adapters that combine metadata, bytecode, and proxy detection.
+/// </summary>
+public record ContractAssessment(
+    string Address,
+    string? Name,
+    bool IsVerified,
+    bool IsProxy,
+    string? ProxyImplementation,
+    bool HasSuspiciouslyShortBytecode,
+    int BytecodeLength,
+    string? AbiFragment
+);
+
+/// <summary>
 /// Lightweight transaction log model used by on-chain verification checks.
 /// </summary>
 public record TransactionLogInfo(

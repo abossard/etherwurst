@@ -25,6 +25,12 @@
                    placeholder="0x... (wallet address or transaction hash)"
                    disabled="@IsAnalyzing"
                    aria-label="Ethereum address or transaction hash" />
+            <select @bind="SelectedBackend" class="form-select scam-backend-select" style="max-width: 160px;" disabled="@IsAnalyzing">
+                @foreach (var b in AvailableBackends)
+                {
+                    <option value="@b">@b</option>
+                }
+            </select>
             <button class="btn btn-analyze"
                     @onclick="StartAnalysis"
                     disabled="@(IsAnalyzing || string.IsNullOrWhiteSpace(InputValue))">
@@ -193,6 +199,8 @@
     private string InputValue { get; set; } = "";
     private bool IsAnalyzing { get; set; }
     private bool DeepAnalysisInProgress { get; set; }
+    private string SelectedBackend { get; set; } = "";
+    private List<string> AvailableBackends { get; set; } = new() { "fake" };
 
     private List<AnalysisProgressEvent> Events { get; } = [];
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
@@ -204,11 +212,26 @@
 
     [Parameter] public string? Address { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         if (!string.IsNullOrWhiteSpace(Address))
         {
             InputValue = Address;
+        }
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("api");
+            var resp = await client.GetFromJsonAsync<BackendsResponse>("/api/backends");
+            if (resp is not null)
+            {
+                AvailableBackends = resp.Available.ToList();
+                SelectedBackend = resp.Default;
+            }
+        }
+        catch
+        {
+            // API unreachable — keep defaults
         }
     }
 
@@ -243,7 +266,8 @@
             Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
 
             var client = HttpClientFactory.CreateClient("api");
-            var url = $"/api/analyze?input={Uri.EscapeDataString(trimmed)}";
+            var backendParam = string.IsNullOrEmpty(SelectedBackend) ? "" : $"&backend={Uri.EscapeDataString(SelectedBackend)}";
+            var url = $"/api/analyze?input={Uri.EscapeDataString(trimmed)}{backendParam}";
 
             using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
@@ -429,5 +453,7 @@
 
     private enum ScamVerdict { Clean, Suspicious, LikelyScam, ConfirmedScam }
     private enum ScamSeverity { Info, Warning, High, Critical }
+
+    private record BackendsResponse(string[] Available, string Default);
 }
 

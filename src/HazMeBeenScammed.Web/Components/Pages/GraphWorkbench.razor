@@ -91,6 +91,16 @@
                     <option value="none">None</option>
                 </select>
             </label>
+
+            <label>
+                Backend
+                <select class="form-select" @bind="SelectedBackend">
+                    @foreach (var b in AvailableBackends)
+                    {
+                        <option value="@b">@b</option>
+                    }
+                </select>
+            </label>
         </div>
 
         <div class="toolbar-actions">
@@ -152,6 +162,8 @@
     private int MaxNodes { get; set; } = 500;
     private int MaxEdges { get; set; } = 1500;
     private int LookbackDays { get; set; } = 7;
+    private string SelectedBackend { get; set; } = "";
+    private List<string> AvailableBackends { get; set; } = new() { "fake" };
 
     private string Layout { get; set; } = "radial";
     private double NodeSizeScale { get; set; } = 1.0;
@@ -166,6 +178,19 @@
         {
             _graphModule = await JS.InvokeAsync<IJSObjectReference>("import", "/js/graphWorkbench.js");
             await _graphModule.InvokeVoidAsync("initializeGraphWorkbench", GraphContainerId);
+
+            try
+            {
+                var client = HttpClientFactory.CreateClient("api");
+                var resp = await client.GetFromJsonAsync<BackendsResponse>("/api/backends");
+                if (resp is not null)
+                {
+                    AvailableBackends = resp.Available.ToList();
+                    SelectedBackend = resp.Default;
+                    StateHasChanged();
+                }
+            }
+            catch { /* API unreachable — keep defaults */ }
         }
     }
 
@@ -183,6 +208,7 @@
         try
         {
             var wallet = Uri.EscapeDataString(WalletInput.Trim());
+            var backendParam = string.IsNullOrEmpty(SelectedBackend) ? "" : $"&backend={Uri.EscapeDataString(SelectedBackend)}";
             var query =
                 $"/api/graph?wallet={wallet}" +
                 $"&depth={Depth}" +
@@ -190,7 +216,8 @@
                 $"&minValueEth={MinValueEth}" +
                 $"&maxNodes={MaxNodes}" +
                 $"&maxEdges={MaxEdges}" +
-                $"&lookbackDays={LookbackDays}";
+                $"&lookbackDays={LookbackDays}" +
+                backendParam;
 
             var client = HttpClientFactory.CreateClient("api");
             var graph = await client.GetFromJsonAsync<WalletGraphResultDto>(query);

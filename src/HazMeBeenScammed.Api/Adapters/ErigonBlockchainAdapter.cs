@@ -19,6 +19,7 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     private readonly HttpClient _blockscoutClient;
     private readonly ILogger<ErigonBlockchainAdapter> _logger;
 
+    private const string Eip1967ImplementationSlot = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public ErigonBlockchainAdapter(
@@ -32,16 +33,15 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
     // ─── IBlockchainAnalyticsPort ────────────────────────────────────
 
-    public async IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
         WalletAddress address,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
 
-        const int PageSize = 25; // Erigon max is 25, stay safely under
+        const int PageSize = 25;
         const int MaxTransactions = 666;
 
-        // ots_searchTransactionsBefore with block 0 = start from latest, walk backwards
         var pageToken = 0UL;
         var totalYielded = 0;
         var blockTimestamps = new Dictionary<string, DateTimeOffset>();
@@ -64,7 +64,6 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
             _logger.LogInformation("Page returned {Count} txs for {Address} (firstPage={First}, lastPage={Last})",
                 result.Txs.Length, address.Value, result.FirstPage, result.LastPage);
 
-            // Batch-fetch block timestamps for new blocks in this page
             foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null && !blockTimestamps.ContainsKey(b)).Distinct())
             {
                 var block = await RpcCall<RpcBlock>(
@@ -87,10 +86,8 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
                 totalYielded++;
             }
 
-            // lastPage = we've reached the oldest transaction
             if (result.LastPage) break;
 
-            // Next cursor: block number of the last tx in this page
             if (result.Txs[^1].BlockNumber != null)
                 pageToken = HexToUlong(result.Txs[^1].BlockNumber);
             else
@@ -100,11 +97,11 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         _logger.LogInformation("Finished fetching {Count} transactions for {Address}", totalYielded, address.Value);
     }
 
-    public async Task<TransactionInfo?> GetTransactionAsync(
+    public async Task<TransactionDetail?> GetTransactionDetailAsync(
         TransactionHash hash,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Fetching transaction {Hash}", hash.Value);
+        _logger.LogInformation("Fetching transaction detail {Hash}", hash.Value);
 
         var tx = await RpcCall<RpcTransaction>(
             "eth_getTransactionByHash", [hash.Value], cancellationToken);
@@ -123,20 +120,41 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
                 timestamp = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
         }
 
-        return MapTransaction(tx, receipt, timestamp);
+        var txInfo = MapTransaction(tx, receipt, timestamp);
+        var logs = MapLogs(receipt);
+        return new TransactionDetail(txInfo, logs);
     }
 
-    public async Task<ContractInfo?> GetContractInfoAsync(
-        string address, CancellationToken cancellationToken = default)
+    public async Task<ContractAssessment?> AssessContractAsync(
+        string address,
+        CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Fetching contract info for {Address}", address);
+        _logger.LogInformation("Assessing contract at {Address}", address);
 
-        // First check if it's a contract via eth_getCode
-        var code = await RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
-        if (code is null or "0x" or "0x0")
+        // Check if it's a contract via eth_getCode
+        var bytecode = await RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
+        if (bytecode is null or "0x" or "0x0")
             return null; // EOA, not a contract
 
+        var bytecodeLength = bytecode.Length;
+
+        // Proxy detection via EIP-1967 storage slot
+        string? proxyImplementation = null;
+        var isProxy = false;
+        var implSlot = await RpcCall<string>("eth_getStorageAt", [address, Eip1967ImplementationSlot, "latest"], cancellationToken);
+        if (IsLikelyProxyImplementation(implSlot))
+        {
+            proxyImplementation = ToAddressFromStorageValue(implSlot!);
+            // Verify the implementation has code
+            var implCode = await RpcCall<string>("eth_getCode", [proxyImplementation, "latest"], cancellationToken);
+            isProxy = !string.IsNullOrWhiteSpace(implCode) && implCode != "0x";
+            if (!isProxy) proxyImplementation = null;
+        }
+
         // Try Blockscout for rich metadata
+        string? name = null;
+        var isVerified = false;
+        string? abiFragment = null;
         try
         {
             var response = await _blockscoutClient.GetAsync(
@@ -149,61 +167,27 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 
                 if (sc != null)
                 {
-                    return new ContractInfo(
-                        Address: address,
-                        Name: sc.Name,
-                        IsVerified: sc.IsVerified ?? false,
-                        IsProxy: sc.IsProxy ?? false,
-                        AbiFragment: sc.Abi != null ? TruncateAbi(sc.Abi) : null
-                    );
+                    name = sc.Name;
+                    isVerified = sc.IsVerified ?? false;
+                    isProxy = isProxy || (sc.IsProxy ?? false);
+                    abiFragment = sc.Abi != null ? TruncateAbi(sc.Abi) : null;
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Blockscout lookup failed for {Address}, falling back", address);
+            _logger.LogWarning(ex, "Blockscout metadata lookup failed for {Address}", address);
         }
 
-        // Fallback: we know it's a contract but have no metadata
-        return new ContractInfo(
+        return new ContractAssessment(
             Address: address,
-            Name: null,
-            IsVerified: false,
-            IsProxy: false,
-            AbiFragment: null
-        );
-    }
-
-    public Task<string?> GetBytecodeAsync(
-        string address,
-        CancellationToken cancellationToken = default) =>
-        RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
-
-    public Task<string?> GetStorageAtAsync(
-        string address,
-        string slot,
-        CancellationToken cancellationToken = default) =>
-        RpcCall<string>("eth_getStorageAt", [address, slot, "latest"], cancellationToken);
-
-    public async Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-        TransactionHash hash,
-        CancellationToken cancellationToken = default)
-    {
-        var receipt = await RpcCall<RpcReceipt>("eth_getTransactionReceipt", [hash.Value], cancellationToken);
-        if (receipt is null)
-        {
-            return null;
-        }
-
-        var logs = receipt.Logs?.Select(l => new TransactionLogInfo(
-            Address: l.Address ?? string.Empty,
-            Topics: (l.Topics ?? []).ToList(),
-            Data: l.Data ?? "0x")).ToList() ?? [];
-
-        return new TransactionReceiptInfo(
-            TransactionHash: hash.Value,
-            Status: receipt.Status ?? "0x0",
-            Logs: logs);
+            Name: name,
+            IsVerified: isVerified,
+            IsProxy: isProxy,
+            ProxyImplementation: proxyImplementation,
+            HasSuspiciouslyShortBytecode: bytecodeLength < 260,
+            BytecodeLength: bytecodeLength,
+            AbiFragment: abiFragment);
     }
 
     // ─── JSON-RPC helpers ────────────────────────────────────────────
@@ -247,14 +231,12 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
             _ => "Pending"
         };
 
-        // Detect ERC-20 transfers from logs
         var tokenSymbol = "";
         var tokenAmount = 0m;
         if (receipt?.Logs != null)
         {
             foreach (var log in receipt.Logs)
             {
-                // ERC-20 Transfer topic: keccak256("Transfer(address,address,uint256)")
                 if (log.Topics is { Length: >= 3 } &&
                     log.Topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
                 {
@@ -273,11 +255,36 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
             TokenSymbol: tokenSymbol,
             TokenAmount: Math.Round(tokenAmount, 4),
             IsContractInteraction: isContract,
-            ContractName: null, // Enriched later by ScamAnalyzer via GetContractInfoAsync
+            ContractName: null,
             Timestamp: timestamp,
             Status: status,
             InputData: tx.Input
         );
+    }
+
+    private static IReadOnlyList<TransactionLogInfo> MapLogs(RpcReceipt? receipt)
+    {
+        if (receipt?.Logs == null) return [];
+        return receipt.Logs.Select(l => new TransactionLogInfo(
+            Address: l.Address ?? string.Empty,
+            Topics: (l.Topics ?? []).ToList(),
+            Data: l.Data ?? "0x")).ToList();
+    }
+
+    private static bool IsLikelyProxyImplementation(string? slotValue)
+    {
+        if (string.IsNullOrWhiteSpace(slotValue) || slotValue == "0x" || slotValue.Length < 10)
+            return false;
+        var clean = slotValue.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? slotValue[2..] : slotValue;
+        return clean.Trim('0').Length >= 40;
+    }
+
+    private static string ToAddressFromStorageValue(string slotValue)
+    {
+        var clean = slotValue.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? slotValue[2..] : slotValue;
+        if (clean.Length < 40)
+            return "0x" + clean.PadLeft(40, '0');
+        return "0x" + clean[^40..];
     }
 
     private string? TruncateAbi(string abi)

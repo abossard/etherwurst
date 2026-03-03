@@ -12,7 +12,6 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
 {
     private const string TransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
     private const string ApprovalTopic = "0x8c5be1e5ebec7d5bd14f714f3a5a2f8f3ecf6f6c7d8b9d5f9c4a1c6f0f8b7c3";
-    private const string Eip1967ImplementationSlot = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 
     public async IAsyncEnumerable<AnalysisProgressEvent> AnalyzeAsync(
         AnalysisRequest request,
@@ -34,6 +33,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             "Fetching transactions from blockchain...", 15);
 
         var transactions = new List<TransactionInfo>();
+        var transactionLogs = new Dictionary<string, IReadOnlyList<TransactionLogInfo>>(StringComparer.OrdinalIgnoreCase);
         string? errorMessage = null;
 
         try
@@ -41,14 +41,18 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             if (request.InputType == AnalysisInputType.WalletAddress)
             {
                 var wallet = new WalletAddress(request.Input);
-                await foreach (var tx in analytics.GetTransactionsForWalletAsync(wallet, cancellationToken))
+                await foreach (var tx in analytics.GetWalletActivityAsync(wallet, cancellationToken))
                     transactions.Add(tx);
             }
             else
             {
                 var hash = new TransactionHash(request.Input);
-                var tx = await analytics.GetTransactionAsync(hash, cancellationToken);
-                if (tx is not null) transactions.Add(tx);
+                var detail = await analytics.GetTransactionDetailAsync(hash, cancellationToken);
+                if (detail is not null)
+                {
+                    transactions.Add(detail.Transaction);
+                    transactionLogs[detail.Transaction.Hash] = detail.Logs;
+                }
             }
         }
         catch (OperationCanceledException)
@@ -72,7 +76,6 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
 
         var indicators = new List<ScamIndicator>();
 
-        // Analyze each transaction for scam patterns
         foreach (var tx in transactions)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -89,11 +92,10 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
         yield return new AnalysisProgressEvent(id, AnalysisStage.DetectingPatterns,
             "Detecting scam patterns...", 65);
 
-        // Pattern detection across all transactions
         indicators.AddRange(DetectPatterns(transactions));
         indicators.AddRange(DetectSimplePortfolioHeuristics(request, transactions));
 
-        var verifiableIndicators = await DetectVerifiableOnChainSignalsAsync(request, transactions, cancellationToken);
+        var verifiableIndicators = await DetectVerifiableOnChainSignalsAsync(request, transactions, transactionLogs, cancellationToken);
         indicators.AddRange(verifiableIndicators);
 
         yield return new AnalysisProgressEvent(id, AnalysisStage.ComputingScore,
@@ -145,7 +147,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
                     {
                         var cpTxs = new List<TransactionInfo>();
                         var wallet = new WalletAddress(addr);
-                        await foreach (var tx in analytics.GetTransactionsForWalletAsync(wallet, cancellationToken))
+                        await foreach (var tx in analytics.GetWalletActivityAsync(wallet, cancellationToken))
                             cpTxs.Add(tx);
 
                         var cpIndicators = new List<ScamIndicator>();
@@ -294,6 +296,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
     private async Task<List<ScamIndicator>> DetectVerifiableOnChainSignalsAsync(
         AnalysisRequest request,
         List<TransactionInfo> transactions,
+        Dictionary<string, IReadOnlyList<TransactionLogInfo>> knownLogs,
         CancellationToken cancellationToken)
     {
         var indicators = new List<ScamIndicator>();
@@ -304,42 +307,39 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             .Take(20)
             .ToList();
 
+        // Use AssessContractAsync — one call replaces bytecode + storage + metadata lookups
         foreach (var contract in contractAddresses)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
-                var implSlot = await analytics.GetStorageAtAsync(contract, Eip1967ImplementationSlot, cancellationToken);
-                if (IsLikelyProxyImplementation(implSlot))
+                var assessment = await analytics.AssessContractAsync(contract, cancellationToken);
+                if (assessment is null) continue;
+
+                if (assessment.IsProxy && !string.IsNullOrEmpty(assessment.ProxyImplementation))
                 {
-                    var implementation = ToAddressFromStorageValue(implSlot!);
-                    var implCode = await analytics.GetBytecodeAsync(implementation, cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(implCode) && implCode != "0x")
-                    {
-                        indicators.Add(new ScamIndicator(
-                            ScamIndicatorType.ProxyUpgradeabilityRisk,
-                            $"Upgradeable proxy pattern detected at {contract}.",
-                            ScamSeverity.Warning,
-                            IndicatorConfidence.Verified,
-                            [contract, implementation]));
-                    }
+                    indicators.Add(new ScamIndicator(
+                        ScamIndicatorType.ProxyUpgradeabilityRisk,
+                        $"Upgradeable proxy pattern detected at {contract}.",
+                        ScamSeverity.Warning,
+                        IndicatorConfidence.Verified,
+                        [contract, assessment.ProxyImplementation]));
                 }
 
-                var bytecode = await analytics.GetBytecodeAsync(contract, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(bytecode) && bytecode.Length < 260)
+                if (assessment.HasSuspiciouslyShortBytecode)
                 {
                     indicators.Add(new ScamIndicator(
                         ScamIndicatorType.MaliciousBytecodeSimilarity,
                         $"Contract {contract} has unusually short bytecode, common in drainer templates.",
                         ScamSeverity.Warning,
                         IndicatorConfidence.High,
-                        [contract, $"bytecodeLength={bytecode.Length}"]));
+                        [contract, $"bytecodeLength={assessment.BytecodeLength}"]));
                 }
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Contract lookup failed for {Contract}, skipping", contract);
+                logger.LogWarning(ex, "Contract assessment failed for {Contract}, skipping", contract);
             }
         }
 
@@ -347,19 +347,27 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             ? request.Input.ToLowerInvariant()
             : null;
 
+        // Use GetTransactionDetailAsync for receipt logs
         foreach (var tx in transactions.Take(80))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var receipt = await analytics.GetTransactionReceiptAsync(new TransactionHash(tx.Hash), cancellationToken);
-                if (receipt is null)
+                // Use cached logs if available, otherwise fetch
+                IReadOnlyList<TransactionLogInfo> logs;
+                if (knownLogs.TryGetValue(tx.Hash, out var cached))
                 {
-                    continue;
+                    logs = cached;
+                }
+                else
+                {
+                    var detail = await analytics.GetTransactionDetailAsync(new TransactionHash(tx.Hash), cancellationToken);
+                    if (detail is null) continue;
+                    logs = detail.Logs;
                 }
 
-                var hasApproval = receipt.Logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(ApprovalTopic, StringComparison.OrdinalIgnoreCase));
-                var hasTransfer = receipt.Logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(TransferTopic, StringComparison.OrdinalIgnoreCase));
+                var hasApproval = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(ApprovalTopic, StringComparison.OrdinalIgnoreCase));
+                var hasTransfer = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(TransferTopic, StringComparison.OrdinalIgnoreCase));
 
                 if (hasApproval && inputWallet is not null)
                 {
@@ -462,32 +470,8 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
         return (verdict, score, summary);
     }
 
-    private static bool IsLikelyProxyImplementation(string? slotValue)
-    {
-        if (string.IsNullOrWhiteSpace(slotValue) || slotValue == "0x" || slotValue.Length < 10)
-        {
-            return false;
-        }
-
-        var clean = slotValue.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? slotValue[2..] : slotValue;
-        return clean.Trim('0').Length >= 40;
-    }
-
-    private static string ToAddressFromStorageValue(string slotValue)
-    {
-        var clean = slotValue.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? slotValue[2..] : slotValue;
-        if (clean.Length < 40)
-        {
-            return "0x" + clean.PadLeft(40, '0');
-        }
-
-        return "0x" + clean[^40..];
-    }
-
     /// <summary>
     /// Combined score: own score contributes 40%, average counterparty score contributes 60%.
-    /// A clean wallet interacting mostly with scammers → high combined score (victim).
-    /// A scammy wallet interacting with clean wallets → moderate combined score.
     /// </summary>
     private static int ComputeCombinedScore(int ownScore, Dictionary<string, int> counterpartyScores)
     {

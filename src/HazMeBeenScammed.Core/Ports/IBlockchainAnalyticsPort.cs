@@ -3,56 +3,28 @@ using HazMeBeenScammed.Core.Domain;
 namespace HazMeBeenScammed.Core.Ports;
 
 /// <summary>
-/// Port (interface) for fetching raw blockchain data.
-/// Implement this adapter for real providers (Etherscan, Blockscout, etc.)
-/// or use the FakeBlockchainAnalyticsAdapter for development/demo.
+/// Port for blockchain data access, oriented around analysis use cases
+/// rather than low-level EVM primitives.
 /// </summary>
 public interface IBlockchainAnalyticsPort
 {
     /// <summary>
-    /// Returns transactions associated with the given wallet address.
+    /// Returns the transaction history for a wallet address.
     /// </summary>
-    IAsyncEnumerable<TransactionInfo> GetTransactionsForWalletAsync(
+    IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
         WalletAddress address, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the single transaction matching the given hash.
+    /// Returns a single transaction with its receipt logs.
     /// </summary>
-    Task<TransactionInfo?> GetTransactionAsync(
+    Task<TransactionDetail?> GetTransactionDetailAsync(
         TransactionHash hash, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns basic information about a smart contract, or null if not a contract.
+    /// Assesses a contract address for risk signals: proxy pattern,
+    /// verification status, suspiciously short bytecode.
+    /// Returns null for EOAs (non-contracts).
     /// </summary>
-    Task<ContractInfo?> GetContractInfoAsync(
+    Task<ContractAssessment?> AssessContractAsync(
         string address, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns contract bytecode at the given address, or null/0x for EOAs.
-    /// </summary>
-    Task<string?> GetBytecodeAsync(
-        string address, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns the storage value for the given slot at the given address.
-    /// </summary>
-    Task<string?> GetStorageAtAsync(
-        string address, string slot, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns receipt-level logs for a transaction.
-    /// </summary>
-    Task<TransactionReceiptInfo?> GetTransactionReceiptAsync(
-        TransactionHash hash, CancellationToken cancellationToken = default);
 }
-
-/// <summary>
-/// Information about a smart contract.
-/// </summary>
-public record ContractInfo(
-    string Address,
-    string? Name,
-    bool IsVerified,
-    bool IsProxy,
-    string? AbiFragment
-);
