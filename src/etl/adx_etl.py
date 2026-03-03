@@ -48,6 +48,11 @@ CRYO_RPS = os.environ.get("CRYO_RPS", "30")
 STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
 FIRST_RUN_LOOKBACK = int(os.environ.get("FIRST_RUN_LOOKBACK", "1000"))
 
+# Backfill overrides — set these to run a specific block range
+START_BLOCK = os.environ.get("START_BLOCK")  # explicit start (overrides progress)
+END_BLOCK = os.environ.get("END_BLOCK")      # explicit end (overrides chain head)
+WORKER_ID = os.environ.get("WORKER_ID", "cryo")  # progress key for parallel workers
+
 WORK_DIR = "/tmp/cryo-extract"
 
 # cryo dataset → ADX table mapping
@@ -149,7 +154,7 @@ def stop_adx():
 
 def get_last_ingested_block(client):
     try:
-        rows = kusto_query(client, "EtlProgress | where dataset == 'cryo' | summarize max(last_block)")
+        rows = kusto_query(client, f"EtlProgress | where dataset == '{WORKER_ID}' | summarize max(last_block)")
         if rows and rows[0][0] is not None:
             return int(rows[0][0])
     except Exception as e:
@@ -160,7 +165,7 @@ def get_last_ingested_block(client):
 def update_progress(client, block_num):
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        kusto_query(client, f".ingest inline into table EtlProgress <| cryo,{block_num},{ts}")
+        kusto_query(client, f".ingest inline into table EtlProgress <| {WORKER_ID},{block_num},{ts}")
     except Exception as e:
         print(f"  Warning: Could not update progress: {e}")
 
@@ -245,26 +250,36 @@ def main():
 
     chain_head = get_chain_head()
     print(f"  Chain head: {chain_head}")
+    print(f"  Worker:  {WORKER_ID}")
 
     ensure_adx_running()
 
     kusto = get_kusto_client()
     ingest = get_ingest_client()
 
-    last_block = get_last_ingested_block(kusto)
-    print(f"  Last ingested: {last_block}")
-
-    if last_block == 0:
-        start = max(chain_head - FIRST_RUN_LOOKBACK, 0)
-        print(f"  First run — starting from block {start}")
+    # Determine block range — explicit overrides take priority
+    if START_BLOCK is not None:
+        start = int(START_BLOCK)
+        print(f"  Explicit START_BLOCK: {start}")
     else:
-        start = last_block + 1
+        last_block = get_last_ingested_block(kusto)
+        print(f"  Last ingested ({WORKER_ID}): {last_block}")
+        if last_block == 0:
+            start = max(chain_head - FIRST_RUN_LOOKBACK, 0)
+            print(f"  First run — starting from block {start}")
+        else:
+            start = last_block + 1
 
-    if start > chain_head:
+    if END_BLOCK is not None:
+        end = min(int(END_BLOCK), chain_head)
+        print(f"  Explicit END_BLOCK: {end}")
+    else:
+        end = min(start + MAX_BLOCKS - 1, chain_head)
+
+    if start > end:
         print("  Already up to date!")
         return
 
-    end = min(start + MAX_BLOCKS - 1, chain_head)
     total_blocks = end - start + 1
     n_batches = (total_blocks + BATCH_SIZE - 1) // BATCH_SIZE
     print(f"  Target: blocks {start} → {end} ({total_blocks:,} blocks, {n_batches} batches)")
