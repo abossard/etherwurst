@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using HazMeBeenScammed.Core.Domain;
 using HazMeBeenScammed.Core.Ports;
 
@@ -12,6 +13,7 @@ namespace HazMeBeenScammed.Api.Adapters;
 /// <summary>
 /// Real implementation of IBlockchainAnalyticsPort backed by Erigon JSON-RPC
 /// and Blockscout REST API for contract metadata.
+/// Uses parallel fan-out for batch operations.
 /// </summary>
 public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
 {
@@ -19,6 +21,7 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
     private readonly HttpClient _blockscoutClient;
     private readonly ILogger<ErigonBlockchainAdapter> _logger;
 
+    private const int MaxParallelism = 8;
     private const string Eip1967ImplementationSlot = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
@@ -31,163 +34,30 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         _logger = logger;
     }
 
-    // ─── IBlockchainAnalyticsPort ────────────────────────────────────
+    // ─── Batch IBlockchainAnalyticsPort ──────────────────────────────
 
-    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
-        WalletAddress address,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
-
-        const int PageSize = 25;
-        const int MaxTransactions = 666;
-
-        var pageToken = 0UL;
-        var totalYielded = 0;
-        var blockTimestamps = new Dictionary<string, DateTimeOffset>();
-
-        while (totalYielded < MaxTransactions)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var result = await RpcCall<OtsSearchResult>(
-                "ots_searchTransactionsBefore",
-                [address.Value, pageToken, PageSize],
-                cancellationToken);
-
-            if (result?.Txs == null || result.Txs.Length == 0)
-            {
-                _logger.LogInformation("No more transactions for {Address} (yielded {Count})", address.Value, totalYielded);
-                break;
-            }
-
-            _logger.LogInformation("Page returned {Count} txs for {Address} (firstPage={First}, lastPage={Last})",
-                result.Txs.Length, address.Value, result.FirstPage, result.LastPage);
-
-            foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null && !blockTimestamps.ContainsKey(b)).Distinct())
-            {
-                var block = await RpcCall<RpcBlock>(
-                    "eth_getBlockByNumber", [bn!, false], cancellationToken);
-                if (block?.Timestamp != null)
-                    blockTimestamps[bn!] = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
-            }
-
-            foreach (var tx in result.Txs)
-            {
-                if (totalYielded >= MaxTransactions) break;
-
-                var receipt = await RpcCall<RpcReceipt>(
-                    "eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
-
-                var timestamp = tx.BlockNumber != null && blockTimestamps.TryGetValue(tx.BlockNumber, out var ts)
-                    ? ts : DateTimeOffset.UtcNow;
-
-                yield return MapTransaction(tx, receipt, timestamp);
-                totalYielded++;
-            }
-
-            if (result.LastPage) break;
-
-            if (result.Txs[^1].BlockNumber != null)
-                pageToken = HexToUlong(result.Txs[^1].BlockNumber);
-            else
-                break;
-        }
-
-        _logger.LogInformation("Finished fetching {Count} transactions for {Address}", totalYielded, address.Value);
-    }
-
-    public async Task<TransactionDetail?> GetTransactionDetailAsync(
-        TransactionHash hash,
+    public IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+        IReadOnlyList<WalletAddress> wallets,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Fetching transaction detail {Hash}", hash.Value);
+        if (wallets.Count == 1)
+            return GetSingleWalletActivityAsync(wallets[0], cancellationToken);
 
-        var tx = await RpcCall<RpcTransaction>(
-            "eth_getTransactionByHash", [hash.Value], cancellationToken);
-
-        if (tx == null) return null;
-
-        var receipt = await RpcCall<RpcReceipt>(
-            "eth_getTransactionReceipt", [hash.Value], cancellationToken);
-
-        var timestamp = DateTimeOffset.UtcNow;
-        if (tx.BlockNumber != null)
-        {
-            var block = await RpcCall<RpcBlock>(
-                "eth_getBlockByNumber", [tx.BlockNumber, false], cancellationToken);
-            if (block?.Timestamp != null)
-                timestamp = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
-        }
-
-        var txInfo = MapTransaction(tx, receipt, timestamp);
-        var logs = MapLogs(receipt);
-        return new TransactionDetail(txInfo, logs);
+        return FanOutAsync(wallets, (wallet, ct) => GetSingleWalletActivityAsync(wallet, ct), cancellationToken);
     }
 
-    public async Task<ContractAssessment?> AssessContractAsync(
-        string address,
+    public IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+        IReadOnlyList<TransactionHash> hashes,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Assessing contract at {Address}", address);
+        return FanOutAsync(hashes, GetSingleTransactionDetailAsync, cancellationToken);
+    }
 
-        // Check if it's a contract via eth_getCode
-        var bytecode = await RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
-        if (bytecode is null or "0x" or "0x0")
-            return null; // EOA, not a contract
-
-        var bytecodeLength = bytecode.Length;
-
-        // Proxy detection via EIP-1967 storage slot
-        string? proxyImplementation = null;
-        var isProxy = false;
-        var implSlot = await RpcCall<string>("eth_getStorageAt", [address, Eip1967ImplementationSlot, "latest"], cancellationToken);
-        if (IsLikelyProxyImplementation(implSlot))
-        {
-            proxyImplementation = ToAddressFromStorageValue(implSlot!);
-            // Verify the implementation has code
-            var implCode = await RpcCall<string>("eth_getCode", [proxyImplementation, "latest"], cancellationToken);
-            isProxy = !string.IsNullOrWhiteSpace(implCode) && implCode != "0x";
-            if (!isProxy) proxyImplementation = null;
-        }
-
-        // Try Blockscout for rich metadata
-        string? name = null;
-        var isVerified = false;
-        string? abiFragment = null;
-        try
-        {
-            var response = await _blockscoutClient.GetAsync(
-                $"/api/v2/smart-contracts/{address}", cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var sc = await response.Content.ReadFromJsonAsync<BlockscoutSmartContract>(
-                    JsonOpts, cancellationToken);
-
-                if (sc != null)
-                {
-                    name = sc.Name;
-                    isVerified = sc.IsVerified ?? false;
-                    isProxy = isProxy || (sc.IsProxy ?? false);
-                    abiFragment = sc.Abi != null ? TruncateAbi(sc.Abi) : null;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Blockscout metadata lookup failed for {Address}", address);
-        }
-
-        return new ContractAssessment(
-            Address: address,
-            Name: name,
-            IsVerified: isVerified,
-            IsProxy: isProxy,
-            ProxyImplementation: proxyImplementation,
-            HasSuspiciouslyShortBytecode: bytecodeLength < 260,
-            BytecodeLength: bytecodeLength,
-            AbiFragment: abiFragment);
+    public IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+        IReadOnlyList<string> addresses,
+        CancellationToken cancellationToken = default)
+    {
+        return FanOutAsync(addresses, AssessSingleContractAsync, cancellationToken);
     }
 
     // ─── JSON-RPC helpers ────────────────────────────────────────────
@@ -215,6 +85,161 @@ public sealed class ErigonBlockchainAdapter : IBlockchainAnalyticsPort
         }
 
         return rpcResponse != null ? rpcResponse.Result : default;
+    }
+
+    // ─── Single-item implementations ───────────────────────────────
+
+    private async IAsyncEnumerable<WalletTransaction> GetSingleWalletActivityAsync(
+        WalletAddress address,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Fetching transactions for wallet {Address}", address.Value);
+
+        const int PageSize = 25;
+        const int MaxTransactions = 666;
+
+        var pageToken = 0UL;
+        var totalYielded = 0;
+        var blockTimestamps = new Dictionary<string, DateTimeOffset>();
+
+        while (totalYielded < MaxTransactions)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var result = await RpcCall<OtsSearchResult>(
+                "ots_searchTransactionsBefore",
+                [address.Value, pageToken, PageSize],
+                cancellationToken);
+
+            if (result?.Txs == null || result.Txs.Length == 0) break;
+
+            foreach (var bn in result.Txs.Select(t => t.BlockNumber).Where(b => b != null && !blockTimestamps.ContainsKey(b)).Distinct())
+            {
+                var block = await RpcCall<RpcBlock>("eth_getBlockByNumber", [bn!, false], cancellationToken);
+                if (block?.Timestamp != null)
+                    blockTimestamps[bn!] = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
+            }
+
+            foreach (var tx in result.Txs)
+            {
+                if (totalYielded >= MaxTransactions) break;
+                var receipt = await RpcCall<RpcReceipt>("eth_getTransactionReceipt", [tx.Hash!], cancellationToken);
+                var timestamp = tx.BlockNumber != null && blockTimestamps.TryGetValue(tx.BlockNumber, out var ts)
+                    ? ts : DateTimeOffset.UtcNow;
+
+                yield return new WalletTransaction(address, MapTransaction(tx, receipt, timestamp));
+                totalYielded++;
+            }
+
+            if (result.LastPage) break;
+            if (result.Txs[^1].BlockNumber != null)
+                pageToken = HexToUlong(result.Txs[^1].BlockNumber);
+            else
+                break;
+        }
+    }
+
+    private async IAsyncEnumerable<TransactionDetail> GetSingleTransactionDetailAsync(
+        TransactionHash hash,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var tx = await RpcCall<RpcTransaction>("eth_getTransactionByHash", [hash.Value], cancellationToken);
+        if (tx == null) yield break;
+
+        var receipt = await RpcCall<RpcReceipt>("eth_getTransactionReceipt", [hash.Value], cancellationToken);
+        var timestamp = DateTimeOffset.UtcNow;
+        if (tx.BlockNumber != null)
+        {
+            var block = await RpcCall<RpcBlock>("eth_getBlockByNumber", [tx.BlockNumber, false], cancellationToken);
+            if (block?.Timestamp != null)
+                timestamp = DateTimeOffset.FromUnixTimeSeconds((long)HexToUlong(block.Timestamp));
+        }
+
+        yield return new TransactionDetail(MapTransaction(tx, receipt, timestamp), MapLogs(receipt));
+    }
+
+    private async IAsyncEnumerable<ContractAssessment> AssessSingleContractAsync(
+        string address,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var bytecode = await RpcCall<string>("eth_getCode", [address, "latest"], cancellationToken);
+        if (bytecode is null or "0x" or "0x0") yield break;
+
+        var bytecodeLength = bytecode.Length;
+        string? proxyImplementation = null;
+        var isProxy = false;
+        var implSlot = await RpcCall<string>("eth_getStorageAt", [address, Eip1967ImplementationSlot, "latest"], cancellationToken);
+        if (IsLikelyProxyImplementation(implSlot))
+        {
+            proxyImplementation = ToAddressFromStorageValue(implSlot!);
+            var implCode = await RpcCall<string>("eth_getCode", [proxyImplementation, "latest"], cancellationToken);
+            isProxy = !string.IsNullOrWhiteSpace(implCode) && implCode != "0x";
+            if (!isProxy) proxyImplementation = null;
+        }
+
+        string? name = null;
+        var isVerified = false;
+        string? abiFragment = null;
+        try
+        {
+            var response = await _blockscoutClient.GetAsync($"/api/v2/smart-contracts/{address}", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var sc = await response.Content.ReadFromJsonAsync<BlockscoutSmartContract>(JsonOpts, cancellationToken);
+                if (sc != null)
+                {
+                    name = sc.Name;
+                    isVerified = sc.IsVerified ?? false;
+                    isProxy = isProxy || (sc.IsProxy ?? false);
+                    abiFragment = sc.Abi != null ? TruncateAbi(sc.Abi) : null;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Blockscout metadata lookup failed for {Address}", address);
+        }
+
+        yield return new ContractAssessment(address, name, isVerified, isProxy,
+            proxyImplementation, bytecodeLength < 260, bytecodeLength, abiFragment);
+    }
+
+    // ─── Parallel fan-out ────────────────────────────────────────────
+
+    private static async IAsyncEnumerable<TResult> FanOutAsync<TInput, TResult>(
+        IReadOnlyList<TInput> inputs,
+        Func<TInput, CancellationToken, IAsyncEnumerable<TResult>> producer,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (inputs.Count == 0) yield break;
+
+        var channel = Channel.CreateBounded<TResult>(new BoundedChannelOptions(64)
+        {
+            SingleWriter = false, SingleReader = true
+        });
+
+        var producerTask = Task.Run(async () =>
+        {
+            try
+            {
+                await Parallel.ForEachAsync(inputs,
+                    new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = cancellationToken },
+                    async (input, ct) =>
+                    {
+                        await foreach (var item in producer(input, ct))
+                            await channel.Writer.WriteAsync(item, ct);
+                    });
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        }, cancellationToken);
+
+        await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+            yield return item;
+
+        await producerTask; // propagate exceptions
     }
 
     // ─── Mapping ─────────────────────────────────────────────────────

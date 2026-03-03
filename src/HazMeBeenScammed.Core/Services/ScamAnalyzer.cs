@@ -118,7 +118,7 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
         yield return new AnalysisProgressEvent(id, AnalysisStage.Completed,
             "Analysis complete.", 100, result);
 
-        // ─── Phase 2: Deep Analysis — analyze counterparty addresses ─────
+        // ─── Phase 2: Deep Analysis — batch-query all counterparty wallets ─────
         if (request.InputType == AnalysisInputType.WalletAddress && transactions.Count > 0)
         {
             var inputAddr = request.Input.ToLowerInvariant();
@@ -135,55 +135,49 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
                     $"Deep analysis: scanning {counterparties.Count} counterparty address(es)...", 100);
 
                 var counterpartyScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                var analyzed = 0;
 
+                // Batch-query all counterparty wallets in one call
+                var wallets = counterparties.Select(a => new WalletAddress(a)).ToList();
+                var grouped = new Dictionary<string, List<TransactionInfo>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var addr in counterparties)
+                    grouped[addr] = new List<TransactionInfo>();
+
+                await foreach (var wt in analytics.GetWalletActivityAsync(wallets, cancellationToken))
+                {
+                    var key = wt.Wallet.Value;
+                    if (grouped.TryGetValue(key, out var list))
+                        list.Add(wt.Transaction);
+                }
+
+                // Score each counterparty from the grouped results
+                var analyzed = 0;
                 foreach (var addr in counterparties)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     analyzed++;
 
-                    AnalysisProgressEvent? cpEvent = null;
-                    try
+                    var cpTxs = grouped[addr];
+                    var cpIndicators = new List<ScamIndicator>();
+                    foreach (var tx in cpTxs)
                     {
-                        var cpTxs = new List<TransactionInfo>();
-                        var wallet = new WalletAddress(addr);
-                        await foreach (var tx in analytics.GetWalletActivityAsync(wallet, cancellationToken))
-                            cpTxs.Add(tx);
-
-                        var cpIndicators = new List<ScamIndicator>();
-                        foreach (var tx in cpTxs)
-                        {
-                            if (tx.IsContractInteraction && tx.ContractName is null)
-                                cpIndicators.Add(new ScamIndicator(ScamIndicatorType.UnverifiedContract,
-                                    $"Unverified contract at {tx.To}", ScamSeverity.Warning));
-                            if (tx.ValueEth == 0 && !tx.IsContractInteraction)
-                                cpIndicators.Add(new ScamIndicator(ScamIndicatorType.ZeroValueTransfer,
-                                    $"Zero-value transfer", ScamSeverity.Info));
-                        }
-                        cpIndicators.AddRange(DetectPatterns(cpTxs));
-
-                        var (cpVerdict, cpScore, _) = ComputeVerdict(cpIndicators, cpTxs);
-                        counterpartyScores[addr] = cpScore;
-
-                        var combinedScore = ComputeCombinedScore(score, counterpartyScores);
-
-                        cpEvent = new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
-                            $"Analyzed {analyzed}/{counterparties.Count}: {addr[..8]}… (risk: {cpScore})",
-                            100, null,
-                            new CounterpartyRiskEvent(id, addr, cpScore, cpVerdict, cpTxs.Count, combinedScore));
+                        if (tx.IsContractInteraction && tx.ContractName is null)
+                            cpIndicators.Add(new ScamIndicator(ScamIndicatorType.UnverifiedContract,
+                                $"Unverified contract at {tx.To}", ScamSeverity.Warning));
+                        if (tx.ValueEth == 0 && !tx.IsContractInteraction)
+                            cpIndicators.Add(new ScamIndicator(ScamIndicatorType.ZeroValueTransfer,
+                                $"Zero-value transfer", ScamSeverity.Info));
                     }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception ex)
-                    {
-                        counterpartyScores[addr] = 0;
-                        cpEvent = new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
-                            $"Analyzed {analyzed}/{counterparties.Count}: {addr[..8]}… (error: {ex.Message})",
-                            100, null,
-                            new CounterpartyRiskEvent(id, addr, 0, ScamVerdict.Clean, 0, ComputeCombinedScore(score, counterpartyScores)));
-                    }
+                    cpIndicators.AddRange(DetectPatterns(cpTxs));
 
-                    if (cpEvent is not null)
-                        yield return cpEvent;
+                    var (cpVerdict, cpScore, _) = ComputeVerdict(cpIndicators, cpTxs);
+                    counterpartyScores[addr] = cpScore;
+
+                    var combinedScore = ComputeCombinedScore(score, counterpartyScores);
+
+                    yield return new AnalysisProgressEvent(id, AnalysisStage.DeepAnalysis,
+                        $"Analyzed {analyzed}/{counterparties.Count}: {addr[..8]}… (risk: {cpScore})",
+                        100, null,
+                        new CounterpartyRiskEvent(id, addr, cpScore, cpVerdict, cpTxs.Count, combinedScore));
                 }
 
                 var finalCombined = ComputeCombinedScore(score, counterpartyScores);
@@ -307,39 +301,37 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             .Take(20)
             .ToList();
 
-        // Use AssessContractAsync — one call replaces bytecode + storage + metadata lookups
-        foreach (var contract in contractAddresses)
+        // Batch contract assessment — one call for all contracts
+        if (contractAddresses.Count > 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             try
             {
-                var assessment = await analytics.AssessContractAsync(contract, cancellationToken);
-                if (assessment is null) continue;
-
-                if (assessment.IsProxy && !string.IsNullOrEmpty(assessment.ProxyImplementation))
+                await foreach (var assessment in analytics.AssessContractsAsync(contractAddresses, cancellationToken))
                 {
-                    indicators.Add(new ScamIndicator(
-                        ScamIndicatorType.ProxyUpgradeabilityRisk,
-                        $"Upgradeable proxy pattern detected at {contract}.",
-                        ScamSeverity.Warning,
-                        IndicatorConfidence.Verified,
-                        [contract, assessment.ProxyImplementation]));
-                }
+                    if (assessment.IsProxy && !string.IsNullOrEmpty(assessment.ProxyImplementation))
+                    {
+                        indicators.Add(new ScamIndicator(
+                            ScamIndicatorType.ProxyUpgradeabilityRisk,
+                            $"Upgradeable proxy pattern detected at {assessment.Address}.",
+                            ScamSeverity.Warning,
+                            IndicatorConfidence.Verified,
+                            [assessment.Address, assessment.ProxyImplementation]));
+                    }
 
-                if (assessment.HasSuspiciouslyShortBytecode)
-                {
-                    indicators.Add(new ScamIndicator(
-                        ScamIndicatorType.MaliciousBytecodeSimilarity,
-                        $"Contract {contract} has unusually short bytecode, common in drainer templates.",
-                        ScamSeverity.Warning,
-                        IndicatorConfidence.High,
-                        [contract, $"bytecodeLength={assessment.BytecodeLength}"]));
+                    if (assessment.HasSuspiciouslyShortBytecode)
+                    {
+                        indicators.Add(new ScamIndicator(
+                            ScamIndicatorType.MaliciousBytecodeSimilarity,
+                            $"Contract {assessment.Address} has unusually short bytecode, common in drainer templates.",
+                            ScamSeverity.Warning,
+                            IndicatorConfidence.High,
+                            [assessment.Address, $"bytecodeLength={assessment.BytecodeLength}"]));
+                    }
                 }
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Contract assessment failed for {Contract}, skipping", contract);
+                logger.LogWarning(ex, "Batch contract assessment failed, skipping");
             }
         }
 
@@ -347,70 +339,81 @@ public sealed class ScamAnalyzer(IBlockchainAnalyticsPort analytics, ILogger<Sca
             ? request.Input.ToLowerInvariant()
             : null;
 
-        // Use GetTransactionDetailAsync for receipt logs
-        foreach (var tx in transactions.Take(80))
+        // Batch receipt/log analysis — one call for all tx hashes not already cached
+        var txsToAnalyze = transactions.Take(80).ToList();
+        var hashesToFetch = txsToAnalyze
+            .Where(tx => !knownLogs.ContainsKey(tx.Hash))
+            .Select(tx => new TransactionHash(tx.Hash))
+            .ToList();
+
+        // Fetch all missing logs in one batch call
+        var fetchedLogs = new Dictionary<string, IReadOnlyList<TransactionLogInfo>>(StringComparer.OrdinalIgnoreCase);
+        if (hashesToFetch.Count > 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                // Use cached logs if available, otherwise fetch
-                IReadOnlyList<TransactionLogInfo> logs;
-                if (knownLogs.TryGetValue(tx.Hash, out var cached))
-                {
-                    logs = cached;
-                }
-                else
-                {
-                    var detail = await analytics.GetTransactionDetailAsync(new TransactionHash(tx.Hash), cancellationToken);
-                    if (detail is null) continue;
-                    logs = detail.Logs;
-                }
-
-                var hasApproval = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(ApprovalTopic, StringComparison.OrdinalIgnoreCase));
-                var hasTransfer = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(TransferTopic, StringComparison.OrdinalIgnoreCase));
-
-                if (hasApproval && inputWallet is not null)
-                {
-                    var laterOutflow = transactions.Any(other =>
-                        other.Timestamp > tx.Timestamp &&
-                        (other.Timestamp - tx.Timestamp).TotalMinutes <= 15 &&
-                        other.From.Equals(inputWallet, StringComparison.OrdinalIgnoreCase) &&
-                        other.ValueEth >= 0.5m);
-
-                    if (laterOutflow)
-                    {
-                        indicators.Add(new ScamIndicator(
-                            ScamIndicatorType.ApprovalDrainPattern,
-                            "Approval event followed by rapid outflow, possible drainer pattern.",
-                            ScamSeverity.Critical,
-                            IndicatorConfidence.Verified,
-                            [tx.Hash]));
-                    }
-                }
-
-                if (tx.IsContractInteraction && tx.Status == "Success" && tx.ValueEth == 0m && !hasApproval && !hasTransfer)
-                {
-                    indicators.Add(new ScamIndicator(
-                        ScamIndicatorType.EventLogAnomaly,
-                        $"Successful contract call with no common transfer/approval events ({tx.Hash[..10]}...).",
-                        ScamSeverity.Warning,
-                        IndicatorConfidence.High,
-                        [tx.Hash]));
-                }
-
-                if (!string.IsNullOrWhiteSpace(tx.InputData) && tx.InputData.StartsWith("0xb6f9de95", StringComparison.OrdinalIgnoreCase))
-                {
-                    indicators.Add(new ScamIndicator(
-                        ScamIndicatorType.SuspiciousContract,
-                        "Call uses unknown high-risk selector pattern.",
-                        ScamSeverity.Warning,
-                        IndicatorConfidence.Medium,
-                        [tx.Hash, tx.InputData[..10]]));
-                }
+                await foreach (var detail in analytics.GetTransactionDetailsAsync(hashesToFetch, cancellationToken))
+                    fetchedLogs[detail.Transaction.Hash] = detail.Logs;
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Receipt analysis failed for tx {TxHash}, skipping", tx.Hash);
+                logger.LogWarning(ex, "Batch receipt fetch failed, skipping log analysis");
+            }
+        }
+
+        // Analyze logs for each transaction
+        foreach (var tx in txsToAnalyze)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IReadOnlyList<TransactionLogInfo>? logs = null;
+            if (knownLogs.TryGetValue(tx.Hash, out var cached))
+                logs = cached;
+            else if (fetchedLogs.TryGetValue(tx.Hash, out var fetched))
+                logs = fetched;
+
+            if (logs == null) continue;
+
+            var hasApproval = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(ApprovalTopic, StringComparison.OrdinalIgnoreCase));
+            var hasTransfer = logs.Any(l => l.Topics.Count > 0 && l.Topics[0].Equals(TransferTopic, StringComparison.OrdinalIgnoreCase));
+
+            if (hasApproval && inputWallet is not null)
+            {
+                var laterOutflow = transactions.Any(other =>
+                    other.Timestamp > tx.Timestamp &&
+                    (other.Timestamp - tx.Timestamp).TotalMinutes <= 15 &&
+                    other.From.Equals(inputWallet, StringComparison.OrdinalIgnoreCase) &&
+                    other.ValueEth >= 0.5m);
+
+                if (laterOutflow)
+                {
+                    indicators.Add(new ScamIndicator(
+                        ScamIndicatorType.ApprovalDrainPattern,
+                        "Approval event followed by rapid outflow, possible drainer pattern.",
+                        ScamSeverity.Critical,
+                        IndicatorConfidence.Verified,
+                        [tx.Hash]));
+                }
+            }
+
+            if (tx.IsContractInteraction && tx.Status == "Success" && tx.ValueEth == 0m && !hasApproval && !hasTransfer)
+            {
+                indicators.Add(new ScamIndicator(
+                    ScamIndicatorType.EventLogAnomaly,
+                    $"Successful contract call with no common transfer/approval events ({tx.Hash[..10]}...).",
+                    ScamSeverity.Warning,
+                    IndicatorConfidence.High,
+                    [tx.Hash]));
+            }
+
+            if (!string.IsNullOrWhiteSpace(tx.InputData) && tx.InputData.StartsWith("0xb6f9de95", StringComparison.OrdinalIgnoreCase))
+            {
+                indicators.Add(new ScamIndicator(
+                    ScamIndicatorType.SuspiciousContract,
+                    "Call uses unknown high-risk selector pattern.",
+                    ScamSeverity.Warning,
+                    IndicatorConfidence.Medium,
+                    [tx.Hash, tx.InputData[..10]]));
             }
         }
 

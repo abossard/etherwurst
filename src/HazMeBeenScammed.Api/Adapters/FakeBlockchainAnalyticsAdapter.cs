@@ -33,62 +33,73 @@ public sealed class FakeBlockchainAnalyticsAdapter : IBlockchainAnalyticsPort
     private static readonly string[] TokenSymbols =
         ["USDC", "USDT", "WETH", "DAI", "SHIB", "PEPE", "SCAMTOKEN", "FAKEUSDC"];
 
-    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
-        WalletAddress address,
+    public async IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+        IReadOnlyList<WalletAddress> wallets,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await Task.Delay(8, cancellationToken);
 
-        var normalizedWallet = NormalizeAddress(address.Value);
-        var transactions = WalletTransactionCache.GetOrAdd(normalizedWallet, GenerateDeterministicNeighborhoodTransactions);
-
-        foreach (var tx in transactions)
+        foreach (var address in wallets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return tx;
+            var normalizedWallet = NormalizeAddress(address.Value);
+            var transactions = WalletTransactionCache.GetOrAdd(normalizedWallet, GenerateDeterministicNeighborhoodTransactions);
+
+            foreach (var tx in transactions)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return new WalletTransaction(address, tx);
+            }
         }
     }
 
-    public async Task<TransactionDetail?> GetTransactionDetailAsync(
-        TransactionHash hash,
-        CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+        IReadOnlyList<TransactionHash> hashes,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await Task.Delay(15, cancellationToken);
-        var random = CreateDeterministicRandom(hash.Value);
+        foreach (var hash in hashes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(5, cancellationToken);
+            var random = CreateDeterministicRandom(hash.Value);
 
-        var tx = GenerateFakeTransaction(
-            "0x" + Convert.ToHexString(GenerateRandomBytes(random, 20)).ToLowerInvariant(),
-            DateTimeOffset.UtcNow.AddHours(-random.Next(1, 72)),
-            random,
-            hash.Value);
+            var tx = GenerateFakeTransaction(
+                "0x" + Convert.ToHexString(GenerateRandomBytes(random, 20)).ToLowerInvariant(),
+                DateTimeOffset.UtcNow.AddHours(-random.Next(1, 72)),
+                random,
+                hash.Value);
 
-        var logs = GenerateFakeLogs(hash.Value);
-        return new TransactionDetail(tx, logs);
+            var logs = GenerateFakeLogs(hash.Value);
+            yield return new TransactionDetail(tx, logs);
+        }
     }
 
-    public async Task<ContractAssessment?> AssessContractAsync(
-        string address,
-        CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+        IReadOnlyList<string> addresses,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await Task.Delay(10, cancellationToken);
-        var random = CreateDeterministicRandom(address);
+        foreach (var address in addresses)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(5, cancellationToken);
+            var random = CreateDeterministicRandom(address);
 
-        if (random.Next(3) == 0) return null; // 1/3 chance not a contract
+            if (random.Next(3) == 0) continue; // EOA — skip
 
-        var isVerified = random.Next(2) == 0;
-        var isProxy = random.Next(4) == 0;
-        var bytecodeLength = random.Next(150, 360);
+            var isVerified = random.Next(2) == 0;
+            var isProxy = random.Next(4) == 0;
+            var bytecodeLength = random.Next(150, 360);
 
-        return new ContractAssessment(
-            Address: address,
-            Name: isVerified ? KnownContracts[random.Next(KnownContracts.Length)] : null,
-            IsVerified: isVerified,
-            IsProxy: isProxy,
-            ProxyImplementation: isProxy ? DeriveAddress(address, 555) : null,
-            HasSuspiciouslyShortBytecode: bytecodeLength < 130,
-            BytecodeLength: bytecodeLength,
-            AbiFragment: isVerified ? "transfer(address,uint256)" : null
-        );
+            yield return new ContractAssessment(
+                Address: address,
+                Name: isVerified ? KnownContracts[random.Next(KnownContracts.Length)] : null,
+                IsVerified: isVerified,
+                IsProxy: isProxy,
+                ProxyImplementation: isProxy ? DeriveAddress(address, 555) : null,
+                HasSuspiciouslyShortBytecode: bytecodeLength < 130,
+                BytecodeLength: bytecodeLength,
+                AbiFragment: isVerified ? "transfer(address,uint256)" : null);
+        }
     }
 
     private static List<TransactionLogInfo> GenerateFakeLogs(string txHash)

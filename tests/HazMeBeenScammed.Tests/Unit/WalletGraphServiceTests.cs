@@ -70,62 +70,56 @@ public class WalletGraphServiceTests
     {
         private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-        public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
-            WalletAddress address,
+        public async IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+            IReadOnlyList<WalletAddress> wallets,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();
-            var wallet = address.Value.ToLowerInvariant();
-
-            if (wallet == RootWallet)
+            foreach (var address in wallets)
             {
-                yield return new TransactionInfo(
-                    Hash: "0x" + new string('1', 64),
-                    From: RootWallet,
-                    To: "0x1111111111111111111111111111111111111111",
-                    ValueEth: 1.2m,
-                    TokenSymbol: "USDC",
-                    TokenAmount: 100m,
-                    IsContractInteraction: false,
-                    ContractName: null,
-                    Timestamp: Now.AddHours(-6),
-                    Status: "Success");
+                var wallet = address.Value.ToLowerInvariant();
 
-                yield return new TransactionInfo(
-                    Hash: "0x" + new string('2', 64),
-                    From: "0x2222222222222222222222222222222222222222",
-                    To: RootWallet,
-                    ValueEth: 0.4m,
-                    TokenSymbol: "",
-                    TokenAmount: 0m,
-                    IsContractInteraction: false,
-                    ContractName: null,
-                    Timestamp: Now.AddHours(-4),
-                    Status: "Success");
+                if (wallet == RootWallet)
+                {
+                    yield return new WalletTransaction(address, new TransactionInfo(
+                        Hash: "0x" + new string('1', 64), From: RootWallet,
+                        To: "0x1111111111111111111111111111111111111111", ValueEth: 1.2m,
+                        TokenSymbol: "USDC", TokenAmount: 100m, IsContractInteraction: false,
+                        ContractName: null, Timestamp: Now.AddHours(-6), Status: "Success"));
 
-                yield break;
-            }
-
-            if (wallet == "0x1111111111111111111111111111111111111111")
-            {
-                yield return new TransactionInfo(
-                    Hash: "0x" + new string('3', 64),
-                    From: "0x1111111111111111111111111111111111111111",
-                    To: "0x3333333333333333333333333333333333333333",
-                    ValueEth: 0.9m,
-                    TokenSymbol: "DAI",
-                    TokenAmount: 50m,
-                    IsContractInteraction: true,
-                    ContractName: "Router",
-                    Timestamp: Now.AddHours(-2),
-                    Status: "Success");
+                    yield return new WalletTransaction(address, new TransactionInfo(
+                        Hash: "0x" + new string('2', 64),
+                        From: "0x2222222222222222222222222222222222222222", To: RootWallet,
+                        ValueEth: 0.4m, TokenSymbol: "", TokenAmount: 0m,
+                        IsContractInteraction: false, ContractName: null,
+                        Timestamp: Now.AddHours(-4), Status: "Success"));
+                }
+                else if (wallet == "0x1111111111111111111111111111111111111111")
+                {
+                    yield return new WalletTransaction(address, new TransactionInfo(
+                        Hash: "0x" + new string('3', 64),
+                        From: "0x1111111111111111111111111111111111111111",
+                        To: "0x3333333333333333333333333333333333333333", ValueEth: 0.9m,
+                        TokenSymbol: "DAI", TokenAmount: 50m, IsContractInteraction: true,
+                        ContractName: "Router", Timestamp: Now.AddHours(-2), Status: "Success"));
+                }
             }
         }
 
-        public Task<TransactionDetail?> GetTransactionDetailAsync(TransactionHash hash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<TransactionDetail?>(null);
+        public async IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+            IReadOnlyList<TransactionHash> hashes,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield break;
+        }
 
-        public Task<ContractAssessment?> AssessContractAsync(string address, CancellationToken cancellationToken = default) =>
-            Task.FromResult<ContractAssessment?>(null);
+        public async IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+            IReadOnlyList<string> addresses,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield break;
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using HazMeBeenScammed.Core.Domain;
 using HazMeBeenScammed.Core.Ports;
 
@@ -9,13 +10,15 @@ namespace HazMeBeenScammed.Api.Adapters;
 /// <summary>
 /// IBlockchainAnalyticsPort backed by Blockscout REST API v2.
 /// Provides enriched data (decoded method names, token transfers, address labels).
-/// Falls back to Erigon for live-state operations only when needed.
+/// Uses parallel HTTP fan-out for batch operations.
 /// </summary>
 public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
 {
     private readonly HttpClient _client;
     private readonly IBlockchainAnalyticsPort? _fallback;
     private readonly ILogger<BlockscoutBlockchainAdapter> _logger;
+
+    private const int MaxParallelism = 8;
 
     public BlockscoutBlockchainAdapter(
         HttpClient client,
@@ -27,9 +30,35 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
         _logger = logger;
     }
 
-    // ─── IBlockchainAnalyticsPort ────────────────────────────────────
+    // ─── Batch IBlockchainAnalyticsPort ──────────────────────────────
 
-    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
+    public IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+        IReadOnlyList<WalletAddress> wallets,
+        CancellationToken cancellationToken = default)
+    {
+        if (wallets.Count == 1)
+            return GetSingleWalletActivityAsync(wallets[0], cancellationToken);
+
+        return FanOutAsync(wallets, (w, ct) => GetSingleWalletActivityAsync(w, ct), cancellationToken);
+    }
+
+    public IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+        IReadOnlyList<TransactionHash> hashes,
+        CancellationToken cancellationToken = default)
+    {
+        return FanOutAsync(hashes, GetSingleTransactionDetailAsync, cancellationToken);
+    }
+
+    public IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+        IReadOnlyList<string> addresses,
+        CancellationToken cancellationToken = default)
+    {
+        return FanOutAsync(addresses, AssessSingleContractAsync, cancellationToken);
+    }
+
+    // ─── Single-item implementations ─────────────────────────────────
+
+    private async IAsyncEnumerable<WalletTransaction> GetSingleWalletActivityAsync(
         WalletAddress address,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -64,7 +93,7 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
             foreach (var tx in page.Items)
             {
                 if (yielded >= MaxTransactions) break;
-                yield return MapTransaction(tx);
+                yield return new WalletTransaction(address, MapTransaction(tx));
                 yielded++;
             }
 
@@ -77,21 +106,22 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
         _logger.LogInformation("Blockscout: fetched {Count} transactions for {Address}", yielded, address.Value);
     }
 
-    public async Task<TransactionDetail?> GetTransactionDetailAsync(
+    private async IAsyncEnumerable<TransactionDetail> GetSingleTransactionDetailAsync(
         TransactionHash hash,
-        CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Blockscout: fetching transaction detail {Hash}", hash.Value);
 
+        TransactionDetail? result = null;
+        var useFallback = false;
         try
         {
             var tx = await _client.GetFromJsonAsync<BsTransaction>(
                 $"/api/v2/transactions/{hash.Value}", cancellationToken);
-            if (tx == null) return null;
+            if (tx == null) yield break;
 
             var txInfo = MapTransaction(tx);
 
-            // Fetch logs
             var logsResponse = await _client.GetFromJsonAsync<BsTransactionLogsResponse>(
                 $"/api/v2/transactions/{hash.Value}/logs", cancellationToken);
 
@@ -103,65 +133,119 @@ public sealed class BlockscoutBlockchainAdapter : IBlockchainAnalyticsPort
                 Data: l.Data ?? "0x"
             )).ToList() ?? new List<TransactionLogInfo>();
 
-            return new TransactionDetail(txInfo, logs);
+            result = new TransactionDetail(txInfo, logs);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return null;
+            yield break;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Blockscout: failed fetching tx detail {Hash}, trying fallback", hash.Value);
-            return _fallback != null
-                ? await _fallback.GetTransactionDetailAsync(hash, cancellationToken)
-                : null;
+            useFallback = true;
         }
+
+        if (useFallback && _fallback != null)
+        {
+            await foreach (var d in _fallback.GetTransactionDetailsAsync([hash], cancellationToken))
+                yield return d;
+            yield break;
+        }
+
+        if (result != null)
+            yield return result;
     }
 
-    public async Task<ContractAssessment?> AssessContractAsync(
-        string address, CancellationToken cancellationToken = default)
+    private async IAsyncEnumerable<ContractAssessment> AssessSingleContractAsync(
+        string address,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Blockscout: assessing contract {Address}", address);
 
+        ContractAssessment? result = null;
+        var useFallback = false;
         try
         {
-            // Check if it's a contract
             var addrInfo = await _client.GetFromJsonAsync<BsAddress>(
                 $"/api/v2/addresses/{address}", cancellationToken);
 
-            if (addrInfo == null || !addrInfo.IsContract)
-                return null;
+            if (addrInfo == null || !addrInfo.IsContract) yield break;
 
-            // Fetch smart contract details — Blockscout already knows proxy/verified/ABI
             BsSmartContract? sc = null;
             try
             {
                 sc = await _client.GetFromJsonAsync<BsSmartContract>(
                     $"/api/v2/smart-contracts/{address}", cancellationToken);
             }
-            catch { /* smart-contracts endpoint may 404 for unverified */ }
+            catch { /* unverified contracts may 404 */ }
 
-            return new ContractAssessment(
+            result = new ContractAssessment(
                 Address: address,
                 Name: sc?.Name ?? addrInfo.Name,
                 IsVerified: sc?.IsVerified ?? false,
                 IsProxy: sc?.IsProxy ?? false,
-                ProxyImplementation: null, // Blockscout doesn't expose impl address directly in v2
-                HasSuspiciouslyShortBytecode: false, // Would need fallback for bytecode length
+                ProxyImplementation: null,
+                HasSuspiciouslyShortBytecode: false,
                 BytecodeLength: 0,
                 AbiFragment: sc?.Abi != null ? TruncateAbi(sc.Abi) : null);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return null;
+            yield break;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Blockscout: contract assessment failed for {Address}, trying fallback", address);
-            return _fallback != null
-                ? await _fallback.AssessContractAsync(address, cancellationToken)
-                : null;
+            useFallback = true;
         }
+
+        if (useFallback && _fallback != null)
+        {
+            await foreach (var a in _fallback.AssessContractsAsync([address], cancellationToken))
+                yield return a;
+            yield break;
+        }
+
+        if (result != null)
+            yield return result;
+    }
+
+    // ─── Parallel fan-out ────────────────────────────────────────────
+
+    private static async IAsyncEnumerable<TResult> FanOutAsync<TInput, TResult>(
+        IReadOnlyList<TInput> inputs,
+        Func<TInput, CancellationToken, IAsyncEnumerable<TResult>> producer,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (inputs.Count == 0) yield break;
+
+        var channel = Channel.CreateBounded<TResult>(new BoundedChannelOptions(64)
+        {
+            SingleWriter = false, SingleReader = true
+        });
+
+        var producerTask = Task.Run(async () =>
+        {
+            try
+            {
+                await Parallel.ForEachAsync(inputs,
+                    new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = cancellationToken },
+                    async (input, ct) =>
+                    {
+                        await foreach (var item in producer(input, ct))
+                            await channel.Writer.WriteAsync(item, ct);
+                    });
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        }, cancellationToken);
+
+        await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+            yield return item;
+
+        await producerTask;
     }
 
     // ─── Mapping ─────────────────────────────────────────────────────

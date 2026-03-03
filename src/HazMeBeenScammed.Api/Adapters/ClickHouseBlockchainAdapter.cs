@@ -30,21 +30,27 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
-        WalletAddress address,
+    public async IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+        IReadOnlyList<WalletAddress> wallets,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("ClickHouse: fetching transactions for {Address}", address.Value);
-        var addr = address.Value.ToLowerInvariant();
+        if (wallets.Count == 0) yield break;
 
-        const string sql = """
+        _logger.LogInformation("ClickHouse: batch fetching transactions for {Count} wallet(s)", wallets.Count);
+
+        // Build a set for fast lookup and SQL IN clause
+        var walletSet = new HashSet<string>(wallets.Select(w => w.Value.ToLowerInvariant()), StringComparer.OrdinalIgnoreCase);
+        var walletLookup = wallets.ToDictionary(w => w.Value.ToLowerInvariant(), w => w, StringComparer.OrdinalIgnoreCase);
+        var inClause = string.Join(",", walletSet.Select(w => $"'{w}'"));
+
+        var sql = $"""
             SELECT
                 hash, from_address, to_address, value,
                 status, timestamp, input_data, gas_used
             FROM ethereum.transactions
-            WHERE from_address = {address:String} OR to_address = {address:String}
+            WHERE from_address IN ({inClause}) OR to_address IN ({inClause})
             ORDER BY timestamp DESC
-            LIMIT 666
+            LIMIT {wallets.Count * 666}
             """;
 
         await using var conn = new ClickHouseConnection(_connectionString);
@@ -52,31 +58,41 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        cmd.AddParameter("address", addr);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            yield return MapFromReader(reader);
+            var tx = MapFromReader(reader);
+            var fromLower = tx.From.ToLowerInvariant();
+            var toLower = tx.To.ToLowerInvariant();
+
+            // Tag with each queried wallet this tx belongs to
+            if (walletLookup.TryGetValue(fromLower, out var fromWallet))
+                yield return new WalletTransaction(fromWallet, tx);
+            if (walletLookup.TryGetValue(toLower, out var toWallet) && !toLower.Equals(fromLower, StringComparison.OrdinalIgnoreCase))
+                yield return new WalletTransaction(toWallet, tx);
         }
 
-        _logger.LogInformation("ClickHouse: finished wallet query for {Address}", address.Value);
+        _logger.LogInformation("ClickHouse: finished batch wallet query for {Count} wallet(s)", wallets.Count);
     }
 
-    public async Task<TransactionDetail?> GetTransactionDetailAsync(
-        TransactionHash hash,
-        CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+        IReadOnlyList<TransactionHash> hashes,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("ClickHouse: fetching transaction detail {Hash}", hash.Value);
+        if (hashes.Count == 0) yield break;
 
-        const string sql = """
+        _logger.LogInformation("ClickHouse: batch fetching {Count} transaction detail(s)", hashes.Count);
+
+        var inClause = string.Join(",", hashes.Select(h => $"'{h.Value.ToLowerInvariant()}'"));
+
+        var sql = $"""
             SELECT
                 hash, from_address, to_address, value,
                 status, timestamp, input_data, gas_used
             FROM ethereum.transactions
-            WHERE hash = {hash:String}
-            LIMIT 1
+            WHERE hash IN ({inClause})
             """;
 
         await using var conn = new ClickHouseConnection(_connectionString);
@@ -84,41 +100,47 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        cmd.AddParameter("hash", hash.Value.ToLowerInvariant());
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
 
-        if (await reader.ReadAsync(cancellationToken))
+        var foundHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(cancellationToken))
         {
             var tx = MapFromReader(reader);
+            foundHashes.Add(tx.Hash);
             // ClickHouse doesn't store receipt logs — delegate to fallback for logs
+            IReadOnlyList<TransactionLogInfo> logs = [];
             if (_fallback != null)
             {
-                var detail = await _fallback.GetTransactionDetailAsync(hash, cancellationToken);
-                if (detail != null)
-                    return new TransactionDetail(tx, detail.Logs);
+                var detail = await _fallback.GetTransactionDetailAsync(new TransactionHash(tx.Hash), cancellationToken);
+                if (detail != null) logs = detail.Logs;
             }
-            return new TransactionDetail(tx, []);
+            yield return new TransactionDetail(tx, logs);
         }
 
-        // Fall through to live node if not indexed yet
+        // Fall through to live node for hashes not in ClickHouse
         if (_fallback != null)
         {
-            _logger.LogInformation("ClickHouse: tx not found, falling back to Erigon for {Hash}", hash.Value);
-            return await _fallback.GetTransactionDetailAsync(hash, cancellationToken);
+            var missing = hashes.Where(h => !foundHashes.Contains(h.Value)).ToList();
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation("ClickHouse: {Count} tx(es) not found, falling back", missing.Count);
+                await foreach (var detail in _fallback.GetTransactionDetailsAsync(missing, cancellationToken))
+                    yield return detail;
+            }
         }
-
-        return null;
     }
 
-    public async Task<ContractAssessment?> AssessContractAsync(
-        string address, CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+        IReadOnlyList<string> addresses,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Contract assessment needs live node + metadata — always delegate
         if (_fallback != null)
-            return await _fallback.AssessContractAsync(address, cancellationToken);
-
-        return null;
+        {
+            await foreach (var assessment in _fallback.AssessContractsAsync(addresses, cancellationToken))
+                yield return assessment;
+        }
     }
 
     // ─── Mapping ─────────────────────────────────────────────────────
