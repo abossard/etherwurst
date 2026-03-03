@@ -27,6 +27,7 @@ if (!string.IsNullOrEmpty(erigonUrl))
     {
         options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(120);
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(180);
         options.Retry.MaxRetryAttempts = 1;
     });
 
