@@ -23,7 +23,7 @@ param vpnClientAddressPool string = '172.16.0.0/24'
 param isDeveloper bool = true
 
 @description('Enable Advanced Container Networking Services (Hubble observability + FQDN policies, ~$18/node/month)')
-param enableACNS bool = false
+param enableACNS bool = true
 
 @description('Object ID of the developer principal — auto-set by azd preprovision hook')
 param developerPrincipalId string = ''
@@ -297,6 +297,9 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
       advancedNetworking: {
         enabled: enableACNS
         observability: {
+          enabled: enableACNS
+        }
+        security: {
           enabled: enableACNS
         }
       }
