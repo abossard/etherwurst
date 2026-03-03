@@ -15,12 +15,12 @@ Architecture:
 
 Environment:
   ERIGON_RPC_URL          Erigon JSON-RPC endpoint
-  ADX_ENABLED             Enable ADX ingestion (default: false)
+  ADX_ENABLED             Enable ADX ingestion (default: true)
   ADX_CLUSTER_URI         ADX cluster URI (required if ADX_ENABLED)
   ADX_DATABASE            ADX database name
   AZURE_RESOURCE_GROUP    Azure resource group (for ADX start/stop)
   STOP_ADX_AFTER          Stop ADX cluster after run (default: false)
-  CH_ENABLED              Enable ClickHouse ingestion (default: false)
+  CH_ENABLED              Enable ClickHouse ingestion (default: true)
   CH_URL                  ClickHouse HTTP endpoint (required if CH_ENABLED)
   CH_USER                 ClickHouse username
   CH_PASSWORD             ClickHouse password
@@ -44,14 +44,14 @@ import requests as req
 ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
 
 # ADX target (optional — set ADX_ENABLED=true and provide ADX_CLUSTER_URI)
-ADX_ENABLED = os.environ.get("ADX_ENABLED", "false").lower() == "true"
+ADX_ENABLED = os.environ.get("ADX_ENABLED", "true").lower() == "true"
 ADX_CLUSTER_URI = os.environ.get("ADX_CLUSTER_URI", "")
 ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
 AZURE_RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
 STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
 
 # ClickHouse target (optional — set CH_ENABLED=true and provide CH_URL)
-CH_ENABLED = os.environ.get("CH_ENABLED", "false").lower() == "true"
+CH_ENABLED = os.environ.get("CH_ENABLED", "true").lower() == "true"
 CH_URL = os.environ.get("CH_URL", "")          # e.g. http://host:8123
 CH_USER = os.environ.get("CH_USER", "default")
 CH_PASSWORD = os.environ.get("CH_PASSWORD", "")
