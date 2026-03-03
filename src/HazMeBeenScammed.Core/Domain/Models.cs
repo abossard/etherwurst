@@ -75,6 +75,12 @@ public record TransactionDetail(
 );
 
 /// <summary>
+/// Tags a TransactionInfo with the wallet it was fetched for.
+/// Needed for batch queries: a tx from A→B belongs to both wallets.
+/// </summary>
+public record WalletTransaction(WalletAddress Wallet, TransactionInfo Transaction);
+
+/// <summary>
 /// Use-case-oriented assessment of a contract address.
 /// Produced by adapters that combine metadata, bytecode, and proxy detection.
 /// </summary>

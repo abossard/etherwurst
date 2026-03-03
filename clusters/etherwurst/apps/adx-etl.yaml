@@ -48,16 +48,12 @@ spec:
               env:
                 - name: ERIGON_RPC_URL
                   value: "http://erigon:8545"
-                - name: ADX_ENABLED
-                  value: "true"
                 - name: ADX_CLUSTER_URI
                   value: "${AZURE_ADX_CLUSTER_URI}"
                 - name: ADX_DATABASE
                   value: "${AZURE_ADX_DATABASE_NAME}"
                 - name: AZURE_RESOURCE_GROUP
                   value: "${AZURE_RESOURCE_GROUP}"
-                - name: CH_ENABLED
-                  value: "true"
                 - name: CH_URL
                   value: "http://clickhouse-ethereum-analytics:8123"
                 - name: CH_USER

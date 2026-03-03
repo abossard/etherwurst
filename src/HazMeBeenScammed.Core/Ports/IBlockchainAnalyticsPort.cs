@@ -3,28 +3,30 @@ using HazMeBeenScammed.Core.Domain;
 namespace HazMeBeenScammed.Core.Ports;
 
 /// <summary>
-/// Port for blockchain data access, oriented around analysis use cases
-/// rather than low-level EVM primitives.
+/// Port for blockchain data access. All methods are batch-first: they accept
+/// lists of inputs and stream results. Use the extension methods in
+/// <see cref="BlockchainAnalyticsExtensions"/> for single-item convenience.
 /// </summary>
 public interface IBlockchainAnalyticsPort
 {
     /// <summary>
-    /// Returns the transaction history for a wallet address.
+    /// Returns the transaction history for one or more wallets.
+    /// Each result is tagged with the wallet it was requested for.
     /// </summary>
-    IAsyncEnumerable<TransactionInfo> GetWalletActivityAsync(
-        WalletAddress address, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<WalletTransaction> GetWalletActivityAsync(
+        IReadOnlyList<WalletAddress> wallets, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a single transaction with its receipt logs.
+    /// Returns transaction details (tx + receipt logs) for one or more hashes.
+    /// Missing transactions are silently skipped.
     /// </summary>
-    Task<TransactionDetail?> GetTransactionDetailAsync(
-        TransactionHash hash, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<TransactionDetail> GetTransactionDetailsAsync(
+        IReadOnlyList<TransactionHash> hashes, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Assesses a contract address for risk signals: proxy pattern,
-    /// verification status, suspiciously short bytecode.
-    /// Returns null for EOAs (non-contracts).
+    /// Assesses one or more contract addresses for risk signals.
+    /// EOAs (non-contracts) are silently skipped.
     /// </summary>
-    Task<ContractAssessment?> AssessContractAsync(
-        string address, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ContractAssessment> AssessContractsAsync(
+        IReadOnlyList<string> addresses, CancellationToken cancellationToken = default);
 }
