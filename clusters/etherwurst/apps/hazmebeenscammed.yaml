@@ -49,7 +49,7 @@ spec:
               value: "http://erigon.ethereum.svc.cluster.local:8545"
             # Default backend (erigon | clickhouse | adx | blockscout)
             - name: DefaultBackend
-              value: "erigon"
+              value: "clickhouse"
             # ClickHouse analytics DB
             - name: ClickHouse__ConnectionString
               value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;Username=etherwurst;Password=etherwurst-ch-2026"
