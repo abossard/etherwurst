@@ -53,12 +53,10 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
     // Determine default: best available backend
     var defaultBackend = !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
         : !string.IsNullOrEmpty(erigonUrl) ? "erigon"
+        : !string.IsNullOrEmpty(blockscoutUrl) ? "blockscout"
         : "fake";
 
     var registry = new AdapterRegistry(defaultBackend);
-
-    // Always register fake adapter (always available for testing)
-    registry.Register("fake", new FakeBlockchainAnalyticsAdapter());
 
     // Erigon adapter (if RPC URL configured)
     ErigonBlockchainAdapter? erigonAdapter = null;
@@ -83,6 +81,10 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
             clickhouseConn, erigonAdapter,
             sp.GetRequiredService<ILogger<ClickHouseBlockchainAdapter>>()));
     }
+
+    // Fake adapter only when no real backends are configured (integration tests)
+    if (registry.AvailableBackends.Count == 0)
+        registry.Register("fake", new FakeBlockchainAnalyticsAdapter());
 
     var names = string.Join(", ", registry.AvailableBackends);
     sp.GetRequiredService<ILogger<AdapterRegistry>>()
