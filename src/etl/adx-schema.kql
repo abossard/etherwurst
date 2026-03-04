@@ -2,6 +2,8 @@
 // Azure Data Explorer — Ethereum Blockchain Schema
 // Database: ethereum
 //
+// Column names match cryo (Rust) Parquet output with --hex flag.
+//
 // Apply with:
 //   az kusto script create --cluster-name <ADX> --database-name ethereum \
 //     --resource-group <RG> --name setup-schema \
@@ -10,105 +12,56 @@
 // Or paste into https://<cluster>.kusto.windows.net → ethereum database
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Core Tables ─────────────────────────────────────────────────────────────
+// ─── Core Tables (matching cryo output) ─────────────────────────────────────
 
 .create-merge table Blocks (
-    number: long,
-    hash: string,
-    parent_hash: string,
-    nonce: string,
-    sha3_uncles: string,
-    miner: string,
-    difficulty: string,
-    total_difficulty: string,
-    size: long,
-    extra_data: string,
-    gas_limit: long,
+    block_number: long,
+    block_hash: string,
+    timestamp: long,
+    author: string,
     gas_used: long,
-    timestamp: datetime,
-    transaction_count: int,
+    extra_data: string,
     base_fee_per_gas: long,
-    withdrawals_root: string,
-    blob_gas_used: long,
-    excess_blob_gas: long
+    chain_id: long
 )
 
 .create-merge table Transactions (
-    hash: string,
-    nonce: long,
-    block_hash: string,
     block_number: long,
-    transaction_index: int,
+    transaction_index: long,
+    transaction_hash: string,
+    nonce: long,
     from_address: string,
     to_address: string,
-    value: string,
-    gas: long,
-    gas_price: long,
+    value_binary: string,
+    value_string: string,
+    value_f64: real,
     input: string,
-    block_timestamp: datetime,
-    receipt_cumulative_gas_used: long,
-    receipt_gas_used: long,
-    receipt_contract_address: string,
-    receipt_status: int,
-    receipt_effective_gas_price: long,
-    max_fee_per_gas: long,
-    max_priority_fee_per_gas: long,
+    gas_limit: long,
+    gas_used: long,
+    gas_price: long,
     transaction_type: int,
-    max_fee_per_blob_gas: long,
-    blob_versioned_hashes: dynamic
+    max_priority_fee_per_gas: long,
+    max_fee_per_gas: long,
+    success: bool,
+    n_input_bytes: int,
+    n_input_zero_bytes: int,
+    n_input_nonzero_bytes: int,
+    chain_id: long
 )
 
 .create-merge table Logs (
+    block_number: long,
+    transaction_index: int,
     log_index: int,
     transaction_hash: string,
-    transaction_index: int,
-    block_hash: string,
-    block_number: long,
     address: string,
+    topic0: string,
+    topic1: string,
+    topic2: string,
+    topic3: string,
     data: string,
-    topics: dynamic,
-    block_timestamp: datetime
-)
-
-.create-merge table TokenTransfers (
-    token_address: string,
-    from_address: string,
-    to_address: string,
-    value: string,
-    transaction_hash: string,
-    log_index: int,
-    block_number: long,
-    block_timestamp: datetime
-)
-
-.create-merge table Traces (
-    block_number: long,
-    transaction_hash: string,
-    transaction_index: int,
-    from_address: string,
-    to_address: string,
-    value: string,
-    input: string,
-    output: string,
-    trace_type: string,
-    call_type: string,
-    gas: long,
-    gas_used: long,
-    subtraces: int,
-    trace_address: dynamic,
-    error: string,
-    status: int,
-    block_timestamp: datetime
-)
-
-.create-merge table Contracts (
-    address: string,
-    bytecode: string,
-    block_number: long,
-    transaction_hash: string,
-    block_timestamp: datetime,
-    is_erc20: bool,
-    is_erc721: bool
+    n_data_bytes: int,
+    chain_id: long
 )
 
 // ETL progress tracking
@@ -118,88 +71,20 @@
     updated_at: datetime
 )
 
-// ─── Ingestion Mappings (Parquet — auto-mapped by column name) ───────────────
-
-// Parquet files from cryo map directly by column name. JSON mappings are
-// provided as fallback for any JSON-based ingestion paths.
-
-.create-or-alter table Blocks ingestion json mapping 'BlocksJsonMapping'
-'['
-'  {"column":"number","path":"$.number","datatype":"long"},'
-'  {"column":"hash","path":"$.hash","datatype":"string"},'
-'  {"column":"parent_hash","path":"$.parent_hash","datatype":"string"},'
-'  {"column":"miner","path":"$.miner","datatype":"string"},'
-'  {"column":"gas_limit","path":"$.gas_limit","datatype":"long"},'
-'  {"column":"gas_used","path":"$.gas_used","datatype":"long"},'
-'  {"column":"timestamp","path":"$.timestamp","datatype":"datetime"},'
-'  {"column":"transaction_count","path":"$.transaction_count","datatype":"int"},'
-'  {"column":"base_fee_per_gas","path":"$.base_fee_per_gas","datatype":"long"},'
-'  {"column":"size","path":"$.size","datatype":"long"}'
-']'
-
-.create-or-alter table Transactions ingestion json mapping 'TransactionsJsonMapping'
-'['
-'  {"column":"hash","path":"$.hash","datatype":"string"},'
-'  {"column":"block_number","path":"$.block_number","datatype":"long"},'
-'  {"column":"transaction_index","path":"$.transaction_index","datatype":"int"},'
-'  {"column":"from_address","path":"$.from_address","datatype":"string"},'
-'  {"column":"to_address","path":"$.to_address","datatype":"string"},'
-'  {"column":"value","path":"$.value","datatype":"decimal"},'
-'  {"column":"gas","path":"$.gas","datatype":"long"},'
-'  {"column":"gas_price","path":"$.gas_price","datatype":"long"},'
-'  {"column":"block_timestamp","path":"$.block_timestamp","datatype":"datetime"},'
-'  {"column":"receipt_gas_used","path":"$.receipt_gas_used","datatype":"long"},'
-'  {"column":"receipt_status","path":"$.receipt_status","datatype":"int"},'
-'  {"column":"transaction_type","path":"$.transaction_type","datatype":"int"}'
-']'
-
-.create-or-alter table Logs ingestion json mapping 'LogsJsonMapping'
-'['
-'  {"column":"log_index","path":"$.log_index","datatype":"int"},'
-'  {"column":"transaction_hash","path":"$.transaction_hash","datatype":"string"},'
-'  {"column":"block_number","path":"$.block_number","datatype":"long"},'
-'  {"column":"address","path":"$.address","datatype":"string"},'
-'  {"column":"data","path":"$.data","datatype":"string"},'
-'  {"column":"topics","path":"$.topics","datatype":"dynamic"},'
-'  {"column":"block_timestamp","path":"$.block_timestamp","datatype":"datetime"}'
-']'
-
 // ─── Retention & Caching Policies ────────────────────────────────────────────
 
 // Blockchain data is immutable — keep forever
 .alter table Blocks policy retention softdelete = 36500d recoverability = disabled
 .alter table Transactions policy retention softdelete = 36500d recoverability = disabled
 .alter table Logs policy retention softdelete = 36500d recoverability = disabled
-.alter table TokenTransfers policy retention softdelete = 36500d recoverability = disabled
-.alter table Traces policy retention softdelete = 36500d recoverability = disabled
-.alter table Contracts policy retention softdelete = 36500d recoverability = disabled
 
 // Hot cache: recent data in SSD for fast queries, cold data in blob storage
-// Tune these based on your query patterns
 .alter table Blocks policy caching hot = 90d
 .alter table Transactions policy caching hot = 90d
 .alter table Logs policy caching hot = 30d
-.alter table TokenTransfers policy caching hot = 30d
-.alter table Traces policy caching hot = 7d
-.alter table Contracts policy caching hot = 365d
 
 // ─── Ingestion Batching (tuned for bulk Parquet loads) ───────────────────────
 
 .alter table Blocks policy ingestionbatching @'{"MaximumBatchingTimeSpan":"00:05:00","MaximumNumberOfItems":5000,"MaximumRawDataSizeMB":1024}'
 .alter table Transactions policy ingestionbatching @'{"MaximumBatchingTimeSpan":"00:05:00","MaximumNumberOfItems":10000,"MaximumRawDataSizeMB":1024}'
 .alter table Logs policy ingestionbatching @'{"MaximumBatchingTimeSpan":"00:05:00","MaximumNumberOfItems":10000,"MaximumRawDataSizeMB":1024}'
-.alter table TokenTransfers policy ingestionbatching @'{"MaximumBatchingTimeSpan":"00:05:00","MaximumNumberOfItems":10000,"MaximumRawDataSizeMB":1024}'
-.alter table Traces policy ingestionbatching @'{"MaximumBatchingTimeSpan":"00:05:00","MaximumNumberOfItems":10000,"MaximumRawDataSizeMB":1024}'
-
-// ─── Materialized View: Daily Summary ────────────────────────────────────────
-
-.create materialized-view ifnotexists DailyTxSummary on table Transactions {
-    Transactions
-    | summarize
-        tx_count = count(),
-        total_value = sum(value),
-        total_gas = sum(receipt_gas_used),
-        unique_senders = dcount(from_address),
-        unique_receivers = dcount(to_address)
-    by bin(block_timestamp, 1d)
-}
