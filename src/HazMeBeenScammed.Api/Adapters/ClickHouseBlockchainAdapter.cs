@@ -45,11 +45,11 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         var sql = $"""
             SELECT
-                hash, from_address, to_address, value,
-                status, timestamp, input_data, gas_used
+                hash, from_addr, to_addr, value,
+                status, block_timestamp, input, gas_used
             FROM ethereum.transactions
-            WHERE from_address IN ({inClause}) OR to_address IN ({inClause})
-            ORDER BY timestamp DESC
+            WHERE from_addr IN ({inClause}) OR to_addr IN ({inClause})
+            ORDER BY block_timestamp DESC
             LIMIT {wallets.Count * 666}
             """;
 
@@ -89,8 +89,8 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         var sql = $"""
             SELECT
-                hash, from_address, to_address, value,
-                status, timestamp, input_data, gas_used
+                hash, from_addr, to_addr, value,
+                status, block_timestamp, input, gas_used
             FROM ethereum.transactions
             WHERE hash IN ({inClause})
             """;
