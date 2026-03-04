@@ -25,6 +25,9 @@ param isDeveloper bool = true
 @description('Enable Advanced Container Networking Services (Hubble observability + FQDN policies, ~$18/node/month)')
 param enableACNS bool = true
 
+@description('Enable Azure Data Explorer (ADX) for blockchain analytics')
+param enableAdx bool = false
+
 @description('Object ID of the developer principal — auto-set by azd preprovision hook')
 param developerPrincipalId string = ''
 
@@ -403,7 +406,7 @@ resource appFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
 }
 
 // ADX ETL → federated credential (CronJob in ethereum namespace)
-resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
+resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = if (enableAdx) {
   name: 'adx-etl-workload-identity'
   parent: appIdentity
   dependsOn: [appFederatedCredential]
@@ -418,7 +421,7 @@ resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdenti
 resource apiFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
   name: 'api-workload-identity'
   parent: appIdentity
-  dependsOn: [adxEtlFederatedCredential]
+  dependsOn: enableAdx ? [adxEtlFederatedCredential] : [appFederatedCredential]
   properties: {
     issuer: aks.properties.oidcIssuerProfile.issuerURL
     subject: 'system:serviceaccount:ethereum:hazmebeenscammed-api-sa'
@@ -738,7 +741,7 @@ resource devAIFoundryRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 
 // ─── Azure Data Explorer (blockchain analytics) ──────────────────────
 
-resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = {
+resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = if (enableAdx) {
   name: adxClusterName
   location: location
   sku: {
@@ -755,7 +758,7 @@ resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = {
   }
 }
 
-resource adxDatabase 'Microsoft.Kusto/clusters/databases@2024-04-13' = {
+resource adxDatabase 'Microsoft.Kusto/clusters/databases@2024-04-13' = if (enableAdx) {
   name: adxDatabaseName
   parent: adxCluster
   location: location
@@ -767,7 +770,7 @@ resource adxDatabase 'Microsoft.Kusto/clusters/databases@2024-04-13' = {
 }
 
 // App identity → ADX Database Ingestor (ETL writes via managed identity)
-resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = {
+resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (enableAdx) {
   name: 'app-ingestor'
   parent: adxDatabase
   properties: {
@@ -778,7 +781,7 @@ resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments
 }
 
 // App identity → ADX Database Viewer (ETL reads progress, queries tables)
-resource appAdxViewer 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = {
+resource appAdxViewer 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (enableAdx) {
   name: 'app-viewer'
   parent: adxDatabase
   properties: {
@@ -793,7 +796,7 @@ resource appAdxViewer 'Microsoft.Kusto/clusters/databases/principalAssignments@2
 
 // ─── ADX Schema (applied idempotently via .create-merge) ─────────────
 
-resource adxSchema 'Microsoft.Kusto/clusters/databases/scripts@2024-04-13' = {
+resource adxSchema 'Microsoft.Kusto/clusters/databases/scripts@2024-04-13' = if (enableAdx) {
   name: 'ethereum-schema'
   parent: adxDatabase
   properties: {
@@ -863,7 +866,7 @@ resource acrPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetw
   }
 }
 
-resource adxPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetworking) {
+resource adxPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetworking && enableAdx) {
   name: 'pe-${dashPrefix}-adx'
   location: location
   properties: {
@@ -894,8 +897,8 @@ output AZURE_APPLICATIONINSIGHTS_CONNECTION_STRING string = appInsights.properti
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output AZURE_ALB_SUBNET_ID string = snetAlbId
 output AZURE_AGC_WAF_POLICY_ID string = agcWafPolicy.id
-output AZURE_ADX_CLUSTER_URI string = adxCluster.properties.uri
-output AZURE_ADX_CLUSTER_NAME string = adxCluster.name
-output AZURE_ADX_DATABASE_NAME string = adxDatabaseName
+output AZURE_ADX_CLUSTER_URI string = enableAdx ? adxCluster.properties.uri : ''
+output AZURE_ADX_CLUSTER_NAME string = enableAdx ? adxCluster.name : ''
+output AZURE_ADX_DATABASE_NAME string = enableAdx ? adxDatabaseName : ''
 output AZURE_SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_TENANT_ID string = tenant().tenantId

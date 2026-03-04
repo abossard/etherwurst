@@ -25,6 +25,7 @@ metadata:
     app.kubernetes.io/part-of: etherwurst
     app.kubernetes.io/component: etl
 spec:
+  suspend: true
   schedule: "0 2 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
