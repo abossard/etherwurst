@@ -389,4 +389,181 @@ public sealed class PriceDatabase : IDisposable
     }
 
     public void Dispose() => _conn.Dispose();
+
+    // ── Trading / history query methods ──────────────────────────────────
+
+    public List<PriceHistoryPoint> GetPriceHistory(string vmSize, string region, int days = 30)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT recorded_at, spot_price
+            FROM price_history
+            WHERE vm_size = $vm AND region = $reg
+              AND recorded_at > datetime('now', '-' || $days || ' days')
+            ORDER BY recorded_at ASC;
+        """;
+        var pVm = cmd.CreateParameter(); pVm.ParameterName = "$vm"; pVm.Value = vmSize; cmd.Parameters.Add(pVm);
+        var pReg = cmd.CreateParameter(); pReg.ParameterName = "$reg"; pReg.Value = region; cmd.Parameters.Add(pReg);
+        var pDays = cmd.CreateParameter(); pDays.ParameterName = "$days"; pDays.Value = days; cmd.Parameters.Add(pDays);
+
+        var results = new List<PriceHistoryPoint>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(new PriceHistoryPoint(DateTime.Parse(reader.GetString(0)), (decimal)reader.GetDouble(1)));
+        return results;
+    }
+
+    public List<BigMover> GetBiggestMovers(int hours = 24, int limit = 20)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            WITH range AS (
+                SELECT vm_size, region,
+                       MIN(recorded_at) AS first_ts,
+                       MAX(recorded_at) AS last_ts
+                FROM price_history
+                WHERE recorded_at > datetime('now', '-' || $hours || ' hours')
+                GROUP BY vm_size, region
+            )
+            SELECT r.vm_size, r.region,
+                   sp.friendly_cat, sp.vcpus, sp.memory_gb,
+                   ph_last.spot_price  AS new_price,
+                   ph_first.spot_price AS old_price,
+                   (ph_last.spot_price - ph_first.spot_price) / ph_first.spot_price * 100.0 AS change_pct
+            FROM range r
+            JOIN price_history ph_first
+              ON ph_first.vm_size = r.vm_size AND ph_first.region = r.region AND ph_first.recorded_at = r.first_ts
+            JOIN price_history ph_last
+              ON ph_last.vm_size  = r.vm_size AND ph_last.region  = r.region AND ph_last.recorded_at  = r.last_ts
+            JOIN spot_prices sp
+              ON r.vm_size = sp.vm_size AND r.region = sp.region
+            WHERE ph_first.spot_price != ph_last.spot_price
+            ORDER BY ABS(change_pct) DESC
+            LIMIT $limit;
+        """;
+        var pH = cmd.CreateParameter(); pH.ParameterName = "$hours"; pH.Value = hours; cmd.Parameters.Add(pH);
+        var pL = cmd.CreateParameter(); pL.ParameterName = "$limit"; pL.Value = limit; cmd.Parameters.Add(pL);
+
+        var results = new List<BigMover>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(new BigMover(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.GetInt32(3), (decimal)reader.GetDouble(4),
+                (decimal)reader.GetDouble(5), (decimal)reader.GetDouble(6),
+                (decimal)reader.GetDouble(7)));
+        return results;
+    }
+
+    public List<HeatmapCell> GetHeatmapData()
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT friendly_cat, region,
+                   AVG((1.0 - spot_price / ondemand_price) * 100.0) AS avg_savings_pct,
+                   AVG(spot_price)                                   AS avg_spot,
+                   COUNT(*)                                          AS vm_count
+            FROM spot_prices
+            WHERE ondemand_price > 0
+            GROUP BY friendly_cat, region
+            ORDER BY friendly_cat, region;
+        """;
+        var results = new List<HeatmapCell>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(new HeatmapCell(
+                reader.GetString(0), reader.GetString(1),
+                (decimal)reader.GetDouble(2), (decimal)reader.GetDouble(3),
+                reader.GetInt32(4)));
+        return results;
+    }
+
+    public List<CalculatorResult> GetCalculatorResults(
+        int minVcpus, decimal minMemoryGb, decimal hoursPerMonth,
+        bool lowRiskOnly, IReadOnlyList<string>? regions = null)
+    {
+        using var cmd = _conn.CreateCommand();
+        var where = new List<string>
+        {
+            "vcpus >= $minCpu",
+            "memory_gb >= $minMem",
+            "ondemand_price > 0"
+        };
+        var pCpu = cmd.CreateParameter(); pCpu.ParameterName = "$minCpu"; pCpu.Value = minVcpus; cmd.Parameters.Add(pCpu);
+        var pMem = cmd.CreateParameter(); pMem.ParameterName = "$minMem"; pMem.Value = (double)minMemoryGb; cmd.Parameters.Add(pMem);
+
+        if (lowRiskOnly)
+            where.Add("(eviction_rate IN ('0-5','5-10') OR eviction_rate IS NULL)");
+
+        if (regions is { Count: > 0 })
+        {
+            var ph = string.Join(",", regions.Select((_, i) => $"$cr{i}"));
+            where.Add($"region IN ({ph})");
+            for (var i = 0; i < regions.Count; i++)
+            { var p = cmd.CreateParameter(); p.ParameterName = $"$cr{i}"; p.Value = regions[i]; cmd.Parameters.Add(p); }
+        }
+
+        var clause = "WHERE " + string.Join(" AND ", where);
+        cmd.CommandText = $"""
+            SELECT vm_size, region, friendly_cat, vcpus, memory_gb,
+                   spot_price, ondemand_price, eviction_rate,
+                   (1.0 - spot_price / ondemand_price) * 100.0 AS savings_pct
+            FROM spot_prices {clause}
+            ORDER BY savings_pct DESC
+            LIMIT 200;
+        """;
+
+        var rows = new List<(string vm, string reg, string cat, int cpu, decimal mem,
+            decimal spot, decimal od, string? ev, decimal savPct)>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            rows.Add((
+                reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                reader.GetInt32(3), (decimal)reader.GetDouble(4),
+                (decimal)reader.GetDouble(5), (decimal)reader.GetDouble(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                (decimal)reader.GetDouble(8)));
+
+        // Score each result and return top 20
+        return rows
+            .Select(r =>
+            {
+                var evScore = r.ev switch
+                {
+                    "0-5" => 1.0m, "5-10" => 0.8m, "10-15" => 0.6m,
+                    "15-20" => 0.4m, "20+" => 0.2m, _ => 0.5m
+                };
+                var cpuEff = Math.Clamp((decimal)minVcpus / r.cpu, 0.1m, 1.0m);
+                var memEff = Math.Clamp(minMemoryGb / r.mem, 0.1m, 1.0m);
+                var specEff = (cpuEff + memEff) / 2m;
+                var score = (r.savPct / 100m) * 0.5m + evScore * 0.3m + specEff * 0.2m;
+                var monthlySpot = PriceCalculations.MonthlyCost(r.spot * hoursPerMonth / 730m);
+                var monthlyOd   = PriceCalculations.MonthlyCost(r.od   * hoursPerMonth / 730m);
+                return new CalculatorResult(r.vm, r.reg, r.cat, r.cpu, r.mem,
+                    r.spot, r.od, r.savPct, r.ev, score,
+                    monthlySpot, monthlyOd, monthlyOd - monthlySpot);
+            })
+            .OrderByDescending(r => r.Score)
+            .Take(20)
+            .ToList();
+    }
+
+    public int GetPricesChangedInHours(int hours = 1)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(DISTINCT vm_size || '|' || region) FROM price_history WHERE recorded_at > datetime('now', '-' || $hours || ' hours');";
+        var p = cmd.CreateParameter(); p.ParameterName = "$hours"; p.Value = hours; cmd.Parameters.Add(p);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    public void CleanupOldHistory(int retentionDays = 90)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM price_history WHERE recorded_at < datetime('now', '-' || $days || ' days');";
+        var p = cmd.CreateParameter(); p.ParameterName = "$days"; p.Value = retentionDays; cmd.Parameters.Add(p);
+        cmd.ExecuteNonQuery();
+        using var vacuum = _conn.CreateCommand();
+        vacuum.CommandText = "PRAGMA incremental_vacuum;";
+        vacuum.ExecuteNonQuery();
+    }
 }

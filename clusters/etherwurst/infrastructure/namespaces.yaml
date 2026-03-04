@@ -44,3 +44,11 @@ metadata:
   labels:
     app.kubernetes.io/part-of: etherwurst
     goldilocks.fairwinds.com/enabled: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spot-dashboard
+  labels:
+    app.kubernetes.io/part-of: etherwurst
+    goldilocks.fairwinds.com/enabled: "true"

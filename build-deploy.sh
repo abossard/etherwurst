@@ -22,12 +22,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${SCRIPT_DIR}/src"
 MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/hazmebeenscammed.yaml"
 ETL_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/adx-etl.yaml"
+SPOT_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/spot-dashboard.yaml"
 
 ACR_NAME="${ACR_NAME:-$(cd "$SCRIPT_DIR" && azd env get-value AZURE_CONTAINER_REGISTRY_NAME 2>/dev/null || echo 'acrhazscamr3is7')}"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 API_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-api"
 WEB_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-web"
 ETL_IMAGE="${ACR_LOGIN_SERVER}/adx-etl"
+SPOT_IMAGE="${ACR_LOGIN_SERVER}/spot-dashboard"
 NAMESPACE="ethereum"
 IMAGE_TAG="${IMAGE_TAG:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 
@@ -82,15 +84,24 @@ build_local() {
       > "$etl_log" 2>&1 && echo "OK" >> "$etl_log" ) &
   local etl_pid=$!
 
+  local spot_log
+  spot_log=$(mktemp)
+  ( docker buildx build --platform linux/amd64 --provenance=false \
+      --tag "${SPOT_IMAGE}:${IMAGE_TAG}" --tag "${SPOT_IMAGE}:latest" \
+      --file "${SRC_DIR}/SpotPriceDashboard/Dockerfile" --push "${SRC_DIR}/SpotPriceDashboard" \
+      > "$spot_log" 2>&1 && echo "OK" >> "$spot_log" ) &
+  local spot_pid=$!
+
   local failed=false
   wait "$api_pid" || { err "API build failed:"; cat "$api_log"; failed=true; }
   wait "$web_pid" || { err "Web build failed:"; cat "$web_log"; failed=true; }
   wait "$etl_pid" || { err "ETL build failed:"; cat "$etl_log"; failed=true; }
-  rm -f "$api_log" "$web_log" "$etl_log"
+  wait "$spot_pid" || { err "SpotDashboard build failed:"; cat "$spot_log"; failed=true; }
+  rm -f "$api_log" "$web_log" "$etl_log" "$spot_log"
 
   local elapsed=$(( SECONDS - start_time ))
   $failed && { err "Build failed after ${elapsed}s"; exit 1; }
-  ok "Built & pushed in ${elapsed}s: ${API_IMAGE}:${IMAGE_TAG}, ${WEB_IMAGE}:${IMAGE_TAG}, ${ETL_IMAGE}:${IMAGE_TAG}"
+  ok "Built & pushed in ${elapsed}s: ${API_IMAGE}:${IMAGE_TAG}, ${WEB_IMAGE}:${IMAGE_TAG}, ${ETL_IMAGE}:${IMAGE_TAG}, ${SPOT_IMAGE}:${IMAGE_TAG}"
 }
 
 # ─── Build: ACR Tasks (cloud fallback) ───────────────────────────────
@@ -112,6 +123,12 @@ build_acr() {
     --image "adx-etl:${IMAGE_TAG}" --image "adx-etl:latest" \
     --file "${SRC_DIR}/etl/Dockerfile" "${SCRIPT_DIR}"
   ok "ETL: ${ETL_IMAGE}:${IMAGE_TAG}"
+
+  log "Building SpotPriceDashboard via ACR Tasks..."
+  az acr build --registry "$ACR_NAME" \
+    --image "spot-dashboard:${IMAGE_TAG}" --image "spot-dashboard:latest" \
+    --file "${SRC_DIR}/SpotPriceDashboard/Dockerfile" "${SRC_DIR}/SpotPriceDashboard"
+  ok "SpotDashboard: ${SPOT_IMAGE}:${IMAGE_TAG}"
 }
 
 # ─── Build dispatch ──────────────────────────────────────────────────
@@ -134,13 +151,16 @@ deploy() {
   sed -i.bak -E \
     "s|(adx-etl:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$ETL_MANIFEST"
   rm -f "${ETL_MANIFEST}.bak"
+  sed -i.bak -E \
+    "s|(spot-dashboard:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$SPOT_MANIFEST"
+  rm -f "${SPOT_MANIFEST}.bak"
 
-  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST" "$ETL_MANIFEST"; then
+  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST" "$ETL_MANIFEST" "$SPOT_MANIFEST"; then
     ok "Manifests already at ${IMAGE_TAG}"
     return
   fi
 
-  git -C "$SCRIPT_DIR" add "$MANIFEST" "$ETL_MANIFEST"
+  git -C "$SCRIPT_DIR" add "$MANIFEST" "$ETL_MANIFEST" "$SPOT_MANIFEST"
   git -C "$SCRIPT_DIR" commit -m "deploy: update images to ${IMAGE_TAG}
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
@@ -158,6 +178,11 @@ show_status() {
     echo "  ${d}: $(kubectl get deploy "$d" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
   done
   echo "  adx-etl: $(kubectl get cronjob adx-etl-sync -n "$NAMESPACE" -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
+  echo ""
+  log "SpotPriceDashboard status:"
+  kubectl get pods -n spot-dashboard 2>/dev/null | sed 's/^/  /'
+  echo "  image: $(kubectl get deploy spot-dashboard -n spot-dashboard -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not deployed yet')"
+  echo "  gateway IP: $(kubectl get gateway spot-dashboard-gateway -n spot-dashboard -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || echo 'pending')"
   echo ""
   log "Manifest:"
   grep 'hazmebeenscammed-' "$MANIFEST" | grep image | sed 's/^/  /'

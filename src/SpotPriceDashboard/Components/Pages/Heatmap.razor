@@ -1,0 +1,193 @@
+@page "/heatmap"
+@inject PriceDatabase Db
+
+<PageTitle>Spot VM Price Heatmap</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1" Style="font-family:'JetBrains Mono',monospace; letter-spacing:0.06em;">
+    SAVINGS HEATMAP
+</MudText>
+<MudText Typo="Typo.caption" Class="mb-3" Style="color:#8b949e;">
+    Spot savings % vs on-demand per VM family × region. Green = high savings. Click a cell to explore.
+</MudText>
+
+@* ── Toggle ── *@
+<MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="mb-4">
+    <MudButton OnClick='() => _mode = "savings"'
+               Color='@(_mode == "savings" ? Color.Primary : Color.Default)'>Savings %</MudButton>
+    <MudButton OnClick='() => _mode = "spot"'
+               Color='@(_mode == "spot" ? Color.Primary : Color.Default)'>Spot $/hr</MudButton>
+    <MudButton OnClick='() => _mode = "count"'
+               Color='@(_mode == "count" ? Color.Primary : Color.Default)'>VM Count</MudButton>
+</MudButtonGroup>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+}
+
+@if (_families.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Icon="@Icons.Material.Filled.HourglassEmpty">
+        Waiting for first data collection…
+    </MudAlert>
+}
+else
+{
+    <div class="heatmap-outer">
+        <table class="heatmap-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    @foreach (var r in _regions)
+                    {
+                        <th class="heatmap-region-header" title="@RegionFormatter.Format(r)">
+                            @RegionFormatter.Format(r).Split(' ').Last()
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var fam in _families)
+                {
+                    <tr>
+                        <td class="heatmap-family-label">@fam</td>
+                        @foreach (var region in _regions)
+                        {
+                            var cell = _dataLookup.GetValueOrDefault((fam, region));
+                            var (bg, fg, label) = GetCellStyle(cell);
+                            <td>
+                                <div class="heatmap-cell @(cell == null ? "no-data" : "")"
+                                     style="background:@bg; color:@fg;"
+                                     title="@GetTooltip(fam, region, cell)"
+                                     @onclick="() => NavigateTo(fam, region)">
+                                    @label
+                                </div>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @* ── Legend ── *@
+    <MudGrid Class="mt-4" Spacing="1">
+        <MudItem xs="12">
+            <MudText Typo="Typo.caption" Style="color:#8b949e; text-transform:uppercase; letter-spacing:0.06em;">
+                Legend (@_mode)
+            </MudText>
+        </MudItem>
+        @foreach (var (label, color) in GetLegend())
+        {
+            <MudItem>
+                <div style="display:inline-flex; align-items:center; gap:6px;">
+                    <div style="width:20px; height:14px; border-radius:3px; background:@color;"></div>
+                    <MudText Typo="Typo.caption">@label</MudText>
+                </div>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<string> _families = new();
+    private List<string> _regions  = new();
+    private Dictionary<(string fam, string reg), HeatmapCell> _dataLookup = new();
+    private bool _loading = true;
+    private string _mode = "savings"; // "savings" | "spot" | "count"
+
+    protected override void OnInitialized()
+    {
+        LoadData();
+    }
+
+    private void LoadData()
+    {
+        _loading = true;
+        var data = Db.GetHeatmapData();
+        _families = data.Select(d => d.Family).Distinct().OrderBy(x => x).ToList();
+        _regions  = data.Select(d => d.Region).Distinct().OrderBy(x => x).ToList();
+        _dataLookup = data.ToDictionary(d => (d.Family, d.Region));
+        _loading = false;
+    }
+
+    private (string bg, string fg, string label) GetCellStyle(HeatmapCell? cell)
+    {
+        if (cell == null) return ("#161b22", "#30363d", "—");
+        var (bg, fg) = _mode switch
+        {
+            "savings" => (SavingsColor(cell.SavingsPct), ContrastText(cell.SavingsPct, 0, 100)),
+            "spot"    => (SpotPriceColor(cell.AvgSpot),  "#e6edf3"),
+            "count"   => (CountColor(cell.Count),         "#e6edf3"),
+            _         => ("#21262d", "#8b949e")
+        };
+        var label = _mode switch
+        {
+            "savings" => cell.SavingsPct.ToString("F0") + "%",
+            "spot"    => "$" + cell.AvgSpot.ToString("F3"),
+            "count"   => cell.Count.ToString(),
+            _         => ""
+        };
+        return (bg, fg, label);
+    }
+
+    private string GetTooltip(string fam, string region, HeatmapCell? cell)
+    {
+        if (cell == null) return $"{fam} — {RegionFormatter.Format(region)}: no data";
+        return $"{fam} — {RegionFormatter.Format(region)}\nSavings: {cell.SavingsPct:F1}%\nAvg Spot: ${cell.AvgSpot:F4}/hr\nVMs: {cell.Count}";
+    }
+
+    private void NavigateTo(string fam, string region)
+    {
+        // Navigation to dashboard with filters is handled via href — no-op here for now
+    }
+
+    // ── Color scales ──
+    private static string SavingsColor(decimal pct) => pct switch
+    {
+        >= 88 => "#0a3622", >= 80 => "#0d4f2e", >= 72 => "#1a7f4b",
+        >= 64 => "#2ea65e", >= 56 => "#4ac46a", >= 48 => "#7acf8c",
+        >= 36 => "#b7860b", >= 24 => "#e67c00",
+        _     => "#c62828"
+    };
+
+    private static string SpotPriceColor(decimal spot) => spot switch
+    {
+        <= 0.05m  => "#0d4f2e", <= 0.10m => "#2ea65e",
+        <= 0.25m  => "#4ac46a", <= 0.50m => "#b7860b",
+        <= 1.00m  => "#e67c00", _        => "#c62828"
+    };
+
+    private static string CountColor(int count) => count switch
+    {
+        >= 20 => "#0d4f2e", >= 15 => "#1a7f4b",
+        >= 10 => "#4ac46a", >= 5  => "#b7860b",
+        >= 1  => "#e67c00", _    => "#161b22"
+    };
+
+    private static string ContrastText(decimal value, decimal min, decimal max)
+    {
+        var normalized = max == min ? 0.5m : (value - min) / (max - min);
+        return normalized < 0.4m ? "#e6edf3" : "#0d1117";
+    }
+
+    private IEnumerable<(string label, string color)> GetLegend() => _mode switch
+    {
+        "savings" => new[]
+        {
+            ("≥88%", "#0a3622"), ("≥80%", "#0d4f2e"), ("≥72%", "#1a7f4b"),
+            ("≥64%", "#2ea65e"), ("≥56%", "#4ac46a"), ("≥48%", "#7acf8c"),
+            ("≥36%", "#b7860b"), ("≥24%", "#e67c00"), ("<24%", "#c62828")
+        },
+        "spot" => new[]
+        {
+            ("≤$0.05", "#0d4f2e"), ("≤$0.10", "#2ea65e"), ("≤$0.25", "#4ac46a"),
+            ("≤$0.50", "#b7860b"), ("≤$1.00", "#e67c00"), (">$1.00", "#c62828")
+        },
+        _ => new[]
+        {
+            ("≥20", "#0d4f2e"), ("≥15", "#1a7f4b"), ("≥10", "#4ac46a"),
+            ("≥5",  "#b7860b"), ("≥1",  "#e67c00"), ("0",   "#161b22")
+        }
+    };
+}

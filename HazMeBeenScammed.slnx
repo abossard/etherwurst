@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HazMeBeenScammed.Tests/HazMeBeenScammed.Tests.csproj" />
+    <Project Path="tests/SpotPriceDashboard.E2E/SpotPriceDashboard.E2E.csproj" />
   </Folder>
 </Solution>

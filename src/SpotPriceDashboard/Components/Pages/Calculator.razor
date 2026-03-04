@@ -1,0 +1,221 @@
+@page "/calculator"
+@inject PriceDatabase Db
+
+<PageTitle>Workload Cost Calculator</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1" Style="font-family:'JetBrains Mono',monospace; letter-spacing:0.06em;">
+    WORKLOAD CALCULATOR
+</MudText>
+<MudText Typo="Typo.caption" Class="mb-4" Style="color:#8b949e;">
+    Describe your compute needs — get ranked spot VM recommendations with savings estimates.
+</MudText>
+
+<MudGrid Spacing="3">
+
+    @* ── Input Panel ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4" Elevation="0" Style="background:#161b22; border:1px solid #21262d; position:sticky; top:72px;">
+            <MudText Typo="Typo.subtitle2" Class="mb-4" Style="color:#8b949e; text-transform:uppercase; letter-spacing:0.08em;">
+                Requirements
+            </MudText>
+
+            <MudText Typo="Typo.caption" Style="color:#8b949e;">vCPUs needed: <strong style="color:#c9d1d9;">@_vcpus</strong></MudText>
+            <MudSlider T="int" @bind-Value="_vcpus" Min="1" Max="128" Step="1" Color="Color.Primary" Class="mb-2" />
+
+            <MudText Typo="Typo.caption" Style="color:#8b949e;">RAM needed (GB): <strong style="color:#c9d1d9;">@_memoryGb</strong></MudText>
+            <MudSlider T="decimal" @bind-Value="_memoryGb" Min="1" Max="512" Step="1" Color="Color.Primary" Class="mb-2" />
+
+            <MudText Typo="Typo.caption" Style="color:#8b949e;">
+                Hours / month: <strong style="color:#c9d1d9;">@_hoursPerMonth</strong>
+                <span style="opacity:0.5;"> (@((_hoursPerMonth / 730m * 100m).ToString("F0"))% of full month)</span>
+            </MudText>
+            <MudSlider T="decimal" @bind-Value="_hoursPerMonth" Min="1" Max="730" Step="10" Color="Color.Primary" Class="mb-3" />
+
+            <MudDivider Class="mb-3" />
+
+            <MudSwitch T="bool" @bind-Value="_lowRiskOnly" Color="Color.Success" Class="mb-2">
+                <ChildContent>
+                    <MudText Typo="Typo.body2">Low eviction risk only</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#8b949e;">Filters to 0-10% eviction rate VMs</MudText>
+                </ChildContent>
+            </MudSwitch>
+
+            <MudSelect T="string" Label="Regions (optional)" MultiSelection="true"
+                       @bind-SelectedValues="_selectedRegions"
+                       Variant="Variant.Outlined" Dense="true" Class="mb-4"
+                       Placeholder="All regions">
+                @foreach (var r in _availableRegions)
+                {
+                    <MudSelectItem Value="@r">@RegionFormatter.Format(r)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="Calculate" Disabled="_calculating">
+                @(_calculating ? "Calculating…" : "Find Best Options")
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    @* ── Results Panel ── *@
+    <MudItem xs="12" md="8">
+
+        @if (_results.Count == 0 && !_calculating && !_hasSearched)
+        {
+            <MudPaper Class="pa-6 text-center" Elevation="0" Style="background:#161b22; border:1px solid #21262d;">
+                <MudIcon Icon="@Icons.Material.Outlined.TipsAndUpdates" Style="font-size:48px; color:#21262d;" />
+                <MudText Typo="Typo.h6" Class="mt-2" Style="color:#8b949e;">Set your requirements and click Find Best Options</MudText>
+                <MudText Typo="Typo.body2" Style="color:#30363d;">
+                    Results are ranked by: 50% savings · 30% eviction safety · 20% spec efficiency
+                </MudText>
+            </MudPaper>
+        }
+
+        @if (_calculating)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+        }
+
+        @if (_results.Count > 0)
+        {
+            var top = _results[0];
+
+            @* ── Hero Savings Card ── *@
+            <div class="savings-hero pa-4 mb-4">
+                <MudGrid>
+                    <MudItem xs="12" md="7">
+                        <MudText Typo="Typo.caption" Style="color:#3fb950; text-transform:uppercase; letter-spacing:0.08em;">
+                            🏆 Best Match
+                        </MudText>
+                        <MudText Typo="Typo.h5" Style="color:#e6edf3; font-weight:700;" Class="mt-1">
+                            @top.VmSize
+                        </MudText>
+                        <MudText Typo="Typo.body2" Style="color:#8b949e;">
+                            @RegionFormatter.Format(top.Region) · @top.VCpus vCPU · @top.MemoryGB GB RAM · @top.FriendlyCategory
+                        </MudText>
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <MudText Typo="Typo.caption" Style="color:#3fb950; text-transform:uppercase; letter-spacing:0.08em;">
+                            Potential Savings
+                        </MudText>
+                        <MudText Typo="Typo.h4" Style="color:#3fb950; font-family:'JetBrains Mono',monospace; font-weight:700;">
+                            $@top.MonthlySavings.ToString("F0") / mo
+                        </MudText>
+                        <MudText Typo="Typo.body2" Style="color:#8b949e;">
+                            $@top.MonthlySpot.ToString("F2") spot  vs  $@top.MonthlyOnDemand.ToString("F2") on-demand
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color:#3fb950;">
+                            @top.SavingsPct.ToString("F0")% cheaper · $@(top.MonthlySavings * 12m).ToString("F0") / year
+                        </MudText>
+                    </MudItem>
+                </MudGrid>
+            </div>
+
+            @* ── Ranked Results Table ── *@
+            <MudTable T="CalculatorResult" Items="_results" Dense="true" Hover="true" Striped="true"
+                      Style="background:#0d1117;">
+                <HeaderContent>
+                    <MudTh>#</MudTh>
+                    <MudTh>VM / Spec</MudTh>
+                    <MudTh>Region</MudTh>
+                    <MudTh>Spot $/hr</MudTh>
+                    <MudTh>Monthly</MudTh>
+                    <MudTh>Savings</MudTh>
+                    <MudTh>Risk</MudTh>
+                    <MudTh>Score</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>
+                        <span style="color:#8b949e; font-family:'JetBrains Mono',monospace; font-size:11px;">
+                            @(_results.IndexOf(context) + 1)
+                        </span>
+                    </MudTd>
+                    <MudTd>
+                        <MudText Typo="Typo.body2" Style="font-family:'JetBrains Mono',monospace; font-size:12px;">
+                            @context.VmSize
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="opacity:0.5;">
+                            @context.VCpus vCPU · @context.MemoryGB GB · @context.FriendlyCategory
+                        </MudText>
+                    </MudTd>
+                    <MudTd><MudText Typo="Typo.caption">@RegionFormatter.Format(context.Region)</MudText></MudTd>
+                    <MudTd>
+                        <span style="color:#58a6ff; font-family:'JetBrains Mono',monospace; font-weight:600;">
+                            $@context.SpotPricePerHour.ToString("F4")
+                        </span>
+                    </MudTd>
+                    <MudTd>
+                        <span style="font-family:'JetBrains Mono',monospace; font-size:12px;">
+                            $@context.MonthlySpot.ToString("F0")
+                        </span>
+                    </MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small" Color="@GetSavingsColor(context.SavingsPct)"
+                                 Style="font-weight:700; font-size:11px;">
+                            @context.SavingsPct.ToString("F0")%
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small"
+                                 Style="@($"background:{PriceCalculations.EvictionColor(context.EvictionRate)}; color:white; font-size:10px;")">
+                            @PriceCalculations.EvictionRisk(context.EvictionRate)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div class="score-bar-bg">
+                                <div class="score-bar-fill" style="width:@((context.Score * 100).ToString("F0"))%;"></div>
+                            </div>
+                            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#8b949e;">
+                                @((context.Score * 100).ToString("F0"))
+                            </span>
+                        </div>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            <MudText Typo="Typo.caption" Class="mt-2" Style="color:#30363d;">
+                Score = 50% savings + 30% eviction safety + 20% spec fit. Showing top @_results.Count of available matches.
+            </MudText>
+        }
+
+        @if (_hasSearched && _results.Count == 0 && !_calculating)
+        {
+            <MudAlert Severity="Severity.Warning" Icon="@Icons.Material.Filled.SearchOff">
+                No VMs found matching your criteria. Try relaxing filters (lower vCPU/RAM, or allow higher eviction risk).
+            </MudAlert>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    private int     _vcpus       = 4;
+    private decimal _memoryGb    = 16;
+    private decimal _hoursPerMonth = 730;
+    private bool    _lowRiskOnly = false;
+
+    private List<string> _availableRegions = new();
+    private IEnumerable<string> _selectedRegions = Array.Empty<string>();
+
+    private List<CalculatorResult> _results = new();
+    private bool _calculating = false;
+    private bool _hasSearched = false;
+
+    protected override void OnInitialized()
+    {
+        _availableRegions = Db.GetRegions();
+    }
+
+    private void Calculate()
+    {
+        _calculating = true;
+        _hasSearched  = true;
+        var regionList = _selectedRegions.Any() ? _selectedRegions.ToList() : null;
+        _results = Db.GetCalculatorResults(_vcpus, _memoryGb, _hoursPerMonth, _lowRiskOnly, regionList);
+        _calculating = false;
+    }
+
+    private static Color GetSavingsColor(decimal sav) =>
+        sav >= 80 ? Color.Success : sav >= 50 ? Color.Info : sav >= 20 ? Color.Warning : Color.Error;
+}

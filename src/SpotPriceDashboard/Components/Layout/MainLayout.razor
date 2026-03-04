@@ -1,4 +1,6 @@
 @inherits LayoutComponentBase
+@inject CollectorService Collector
+@implements IDisposable
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -6,15 +8,40 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1" Dense="true">
-        <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" />
-        <MudText Typo="Typo.h6" Class="mr-4">Spot VM Pricing</MudText>
-        <MudButton Href="/" Color="Color.Inherit" Variant="Variant.Text">Dashboard</MudButton>
-        <MudButton Href="/analytics" Color="Color.Inherit" Variant="Variant.Text">Analytics</MudButton>
-        <MudButton Href="/compare" Color="Color.Inherit" Variant="Variant.Text">Compare</MudButton>
+    <MudAppBar Elevation="0" Dense="true" Style="border-bottom: 1px solid #21262d; background: #010409;">
+        <MudIcon Icon="@Icons.Material.Filled.ShowChart" Class="mr-2" Style="color: #3fb950;" />
+        <MudText Typo="Typo.subtitle1" Style="font-weight:700; letter-spacing:0.04em; color:#c9d1d9;" Class="mr-4">
+            SPOT MARKET
+        </MudText>
+        <MudDivider Vertical="true" FlexItem="true" Class="mx-2" Style="background:#21262d;" />
+        <MudButton Href="/" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.Dashboard">Market</MudButton>
+        <MudButton Href="/heatmap" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.GridOn">Heatmap</MudButton>
+        <MudButton Href="/calculator" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.Calculate">Calculator</MudButton>
+        <MudButton Href="/history" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.Timeline">History</MudButton>
+        <MudButton Href="/analytics" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.Analytics">Analytics</MudButton>
+        <MudButton Href="/compare" Color="Color.Inherit" Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Outlined.Compare">Compare</MudButton>
         <MudSpacer />
-        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Inherit"
-                       Href="/api/status" Target="_blank" Title="API Status" />
+        <div class="live-badge mr-3">
+            <span class="live-dot"></span>
+            @if (Collector.IsCollecting)
+            {
+                <span style="color:#d29922;">SYNCING @Collector.RegionsCompleted/@Collector.TotalRegions</span>
+            }
+            else
+            {
+                <span>LIVE</span>
+            }
+        </div>
+        <MudTooltip Text="Trigger manual data refresh">
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Inherit" Size="Size.Small"
+                           Href="/api/collect" />
+        </MudTooltip>
     </MudAppBar>
 
     <MudMainContent Class="pa-4">
@@ -22,26 +49,70 @@
     </MudMainContent>
 </MudLayout>
 
+@* ── Bottom status strip ── *@
+<div class="status-strip">
+    <span>AZURE SPOT MARKET</span>
+    <span class="status-sep">|</span>
+    @if (Collector.IsCollecting)
+    {
+        <span class="status-warn">⬤ COLLECTING @Collector.CurrentRegion</span>
+        <span class="status-sep">|</span>
+        <span>@Collector.RegionsCompleted / @Collector.TotalRegions regions</span>
+    }
+    else
+    {
+        <span class="status-active">⬤ IDLE</span>
+    }
+    @if (Collector.PricesChangedLastCollection > 0)
+    {
+        <span class="status-sep">|</span>
+        <span class="status-active">@Collector.PricesChangedLastCollection prices changed</span>
+    }
+    @if (Collector.LastError is not null)
+    {
+        <span class="status-sep">|</span>
+        <span style="color:#f85149;">@Collector.LastError</span>
+    }
+</div>
+
 @code {
     readonly MudTheme _theme = new()
     {
-        PaletteLight = new PaletteLight
-        {
-            Primary = "#1976d2",
-            Secondary = "#00bcd4",
-            AppbarBackground = "#1565c0"
-        },
         PaletteDark = new PaletteDark
         {
-            Primary = "#42a5f5",
-            Secondary = "#26c6da",
-            Surface = "#1e1e2e",
-            Background = "#11111b",
-            AppbarBackground = "#181825"
+            Primary = "#58a6ff",
+            Secondary = "#3fb950",
+            Tertiary = "#d29922",
+            Error = "#f85149",
+            Success = "#3fb950",
+            Warning = "#d29922",
+            Surface = "#161b22",
+            Background = "#0d1117",
+            BackgroundGray = "#010409",
+            AppbarBackground = "#010409",
+            DrawerBackground = "#010409",
+            TextPrimary = "#c9d1d9",
+            TextSecondary = "#8b949e",
+            ActionDefault = "#8b949e",
+            LinesDefault = "#21262d",
+            TableLines = "#21262d",
+            Divider = "#21262d",
         },
         Typography = new Typography
         {
             Default = new DefaultTypography { FontFamily = ["Inter", "Helvetica", "Arial", "sans-serif"] }
         }
     };
+
+    protected override void OnInitialized()
+    {
+        Collector.PricesUpdated += OnPricesUpdated;
+    }
+
+    private void OnPricesUpdated() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Collector.PricesUpdated -= OnPricesUpdated;
+    }
 }

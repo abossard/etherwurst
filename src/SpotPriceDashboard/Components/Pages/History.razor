@@ -1,0 +1,170 @@
+@page "/history"
+@inject PriceDatabase Db
+
+<PageTitle>Spot Price History</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1" Style="font-family:'JetBrains Mono',monospace; letter-spacing:0.06em;">
+    PRICE HISTORY
+</MudText>
+<MudText Typo="Typo.caption" Class="mb-4" Style="color:#8b949e;">
+    Spot price trend over time for a selected VM. Tracks each price change recorded by the collector.
+</MudText>
+
+@* ── Controls ── *@
+<MudPaper Class="pa-3 mb-4" Elevation="0" Style="background:#161b22; border:1px solid #21262d;">
+    <MudGrid Spacing="2" AlignItems="Center">
+        <MudItem xs="12" md="4">
+            <MudAutocomplete T="string" Label="VM Size" @bind-Value="_vmSize"
+                             SearchFunc="SearchVms" Variant="Variant.Outlined" Dense="true"
+                             Placeholder="e.g. D8s v3" />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" Label="Region" @bind-Value="_region"
+                       Variant="Variant.Outlined" Dense="true">
+                @foreach (var r in _availableRegions)
+                {
+                    <MudSelectItem Value="@r">@RegionFormatter.Format(r)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="8" md="3">
+            <MudSelect T="int" Label="Period" @bind-Value="_days"
+                       Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="7">7 days</MudSelectItem>
+                <MudSelectItem Value="14">14 days</MudSelectItem>
+                <MudSelectItem Value="30">30 days</MudSelectItem>
+                <MudSelectItem Value="90">90 days</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="4" md="1" Class="d-flex align-end">
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Primary"
+                           Variant="Variant.Filled" OnClick="LoadHistory"
+                           Disabled='@(string.IsNullOrWhiteSpace(_vmSize) || string.IsNullOrWhiteSpace(_region))' />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading) { <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" /> }
+
+@if (_history.Count > 0)
+{
+    @* ── Stats row ── *@
+    <MudGrid Class="mb-3" Spacing="2">
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 kpi-card" Elevation="0" Style="--kpi-accent:#58a6ff; background:#161b22;">
+                <div class="kpi-value" style="color:#58a6ff; font-size:1.3rem;">$@_stats.Current.ToString("F4")</div>
+                <div class="kpi-label">Current Spot</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 kpi-card" Elevation="0" Style="--kpi-accent:#3fb950; background:#161b22;">
+                <div class="kpi-value" style="color:#3fb950; font-size:1.3rem;">$@_stats.Min.ToString("F4")</div>
+                <div class="kpi-label">Period Low</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 kpi-card" Elevation="0" Style="--kpi-accent:#f85149; background:#161b22;">
+                <div class="kpi-value" style="color:#f85149; font-size:1.3rem;">$@_stats.Max.ToString("F4")</div>
+                <div class="kpi-label">Period High</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3 kpi-card" Elevation="0" Style="--kpi-accent:#d29922; background:#161b22;">
+                <div class="kpi-value" style="color:#d29922; font-size:1.3rem;">@_stats.Changes</div>
+                <div class="kpi-label">Price Changes</div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    @* ── Chart ── *@
+    <MudPaper Class="pa-3" Elevation="0" Style="background:#161b22; border:1px solid #21262d;">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:#8b949e;">
+            @_vmSize — @RegionFormatter.Format(_region) — last @_days days
+        </MudText>
+        <ApexChart TItem="PriceHistoryPoint" Options="_chartOptions" Height="320">
+            <ApexPointSeries TItem="PriceHistoryPoint"
+                             Items="_history"
+                             Name="Spot $/hr"
+                             SeriesType="SeriesType.Area"
+                             XValue="@(p => p.RecordedAt)"
+                             YValue="@(p => p.SpotPrice)"
+                             OrderBy="@(x => x.X)" />
+        </ApexChart>
+    </MudPaper>
+}
+else if (_hasSearched && !_loading)
+{
+    <MudAlert Severity="Severity.Info" Icon="@Icons.Material.Filled.Info">
+        No price history recorded yet for <strong>@_vmSize</strong> in <strong>@RegionFormatter.Format(_region)</strong>.
+        History is collected on each data refresh. Check back after the next collection cycle.
+    </MudAlert>
+}
+else if (!_hasSearched)
+{
+    <MudPaper Class="pa-6 text-center" Elevation="0" Style="background:#161b22; border:1px solid #21262d;">
+        <MudIcon Icon="@Icons.Material.Outlined.Timeline" Style="font-size:48px; color:#21262d;" />
+        <MudText Typo="Typo.h6" Class="mt-2" Style="color:#8b949e;">Select a VM and region to view price history</MudText>
+        <MudText Typo="Typo.caption" Style="color:#30363d;">Price history is recorded from the moment the dashboard starts collecting.</MudText>
+    </MudPaper>
+}
+
+@code {
+    private string _vmSize  = "";
+    private string _region  = "";
+    private int    _days    = 30;
+
+    private List<string> _availableRegions = new();
+    private List<string> _allVmSizes = new();
+    private List<PriceHistoryPoint> _history = new();
+    private bool _loading = false;
+    private bool _hasSearched = false;
+
+    private record HistoryStats(decimal Current, decimal Min, decimal Max, int Changes);
+    private HistoryStats _stats = new(0, 0, 0, 0);
+
+    private ApexChartOptions<PriceHistoryPoint> _chartOptions = new()
+    {
+        Chart = new Chart
+        {
+            Background = "transparent",
+            Toolbar = new Toolbar { Show = true },
+            Zoom = new Zoom { Enabled = true }
+        },
+        Theme = new Theme { Mode = Mode.Dark },
+        Colors = new List<string> { "#58a6ff" },
+        Stroke = new Stroke { Curve = Curve.Smooth },
+        Xaxis = new XAxis { Type = XAxisType.Datetime },
+        Grid = new Grid { BorderColor = "#21262d" }
+    };
+
+    protected override void OnInitialized()
+    {
+        _availableRegions = Db.GetRegions();
+        _allVmSizes       = Db.QueryPrices().Select(p => p.VmSize).Distinct().OrderBy(x => x).ToList();
+        if (_availableRegions.Count > 0) _region = _availableRegions[0];
+    }
+
+    private Task<IEnumerable<string>> SearchVms(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(_allVmSizes.Take(20));
+        return Task.FromResult(
+            _allVmSizes.Where(v => v.Contains(value, StringComparison.OrdinalIgnoreCase)).Take(20));
+    }
+
+    private void LoadHistory()
+    {
+        if (string.IsNullOrWhiteSpace(_vmSize) || string.IsNullOrWhiteSpace(_region)) return;
+        _loading    = true;
+        _hasSearched = true;
+        _history    = Db.GetPriceHistory(_vmSize, _region, _days);
+        _stats = _history.Count > 0
+            ? new HistoryStats(
+                _history[^1].SpotPrice,
+                _history.Min(h => h.SpotPrice),
+                _history.Max(h => h.SpotPrice),
+                _history.Count)
+            : new HistoryStats(0, 0, 0, 0);
+        _loading = false;
+    }
+}

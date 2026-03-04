@@ -1,0 +1,222 @@
+# ─── Self-signed ClusterIssuer ─────────────────────────────────────────────
+# Used for spot-dashboard HTTPS (self-signed cert — no DNS required).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# ─── TLS Certificate ────────────────────────────────────────────────────────
+# cert-manager generates a self-signed cert and stores it in the Secret below.
+# The Secret is created in the spot-dashboard namespace so the Gateway can use it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spot-dashboard-cert
+  namespace: spot-dashboard
+spec:
+  secretName: spot-dashboard-tls
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  commonName: spot-dashboard.local
+  dnsNames:
+    - spot-dashboard.local
+    - spot-dashboard
+  duration: 8760h   # 1 year
+  renewBefore: 720h # renew 30 days before expiry
+---
+# ─── Persistent Volume Claim — SQLite data ─────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spot-dashboard-data
+  namespace: spot-dashboard
+  labels:
+    app.kubernetes.io/name: spot-dashboard
+    app.kubernetes.io/part-of: spot-dashboard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: premium-ssd-retain
+  resources:
+    requests:
+      storage: 2Gi
+---
+# ─── Deployment ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-dashboard
+  namespace: spot-dashboard
+  labels:
+    app.kubernetes.io/name: spot-dashboard
+    app.kubernetes.io/part-of: spot-dashboard
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spot-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spot-dashboard
+        app.kubernetes.io/part-of: spot-dashboard
+    spec:
+      containers:
+        - name: app
+          image: ${ACR_LOGIN_SERVER}/spot-dashboard:abc1234 # {"$imagepolicy": "flux-system:spot-dashboard"}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+            - name: DbPath
+              value: "/data/spotprices.db"
+            - name: CollectIntervalHours
+              value: "1"
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: spot-dashboard-data
+---
+# ─── Service ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: spot-dashboard
+  namespace: spot-dashboard
+  labels:
+    app.kubernetes.io/name: spot-dashboard
+    app.kubernetes.io/part-of: spot-dashboard
+spec:
+  selector:
+    app.kubernetes.io/name: spot-dashboard
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+---
+# ─── Gateway — gets its own public IP from NGINX Gateway Fabric ────────────
+# A separate Gateway means a separate Azure LoadBalancer IP (no conflicts with
+# the existing etherwurst-gateway that serves checkmyethereum.com).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: spot-dashboard-gateway
+  namespace: spot-dashboard
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: spot-dashboard-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# ─── HTTPRoute: HTTP → HTTPS redirect ───────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: spot-dashboard-http-redirect
+  namespace: spot-dashboard
+spec:
+  parentRefs:
+    - name: spot-dashboard-gateway
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# ─── HTTPRoute: HTTPS → service ─────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: spot-dashboard-https
+  namespace: spot-dashboard
+spec:
+  parentRefs:
+    - name: spot-dashboard-gateway
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: spot-dashboard
+          port: 80
+---
+# ─── Flux ImageRepository ───────────────────────────────────────────────────
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: spot-dashboard
+  namespace: flux-system
+spec:
+  image: ${ACR_LOGIN_SERVER}/spot-dashboard
+  interval: 5m
+  secretRef:
+    name: acr-credentials
+---
+# ─── Flux ImagePolicy ───────────────────────────────────────────────────────
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: spot-dashboard
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: spot-dashboard
+  filterTags:
+    pattern: '^[a-f0-9]+-(?P<ts>[0-9]+)$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc

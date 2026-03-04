@@ -1,0 +1,171 @@
+/* ── Trading Terminal Styles ─────────────────────────────────────── */
+
+/* Live pulse animation */
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #3fb950;
+    text-transform: uppercase;
+}
+.live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: #3fb950;
+    box-shadow: 0 0 6px #3fb950;
+    animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* Price direction colors */
+.price-up     { color: #f85149 !important; }
+.price-down   { color: #3fb950 !important; }
+.price-flat   { color: #8b949e !important; }
+
+/* KPI hero cards */
+.kpi-card {
+    border-left: 3px solid var(--kpi-accent, #58a6ff);
+    border-radius: 6px;
+}
+.kpi-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+.kpi-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    margin-top: 4px;
+}
+
+/* Movers ticker bar */
+.movers-bar {
+    display: flex;
+    gap: 0;
+    overflow: hidden;
+    background: #0d1117;
+    border-top: 1px solid #21262d;
+    border-bottom: 1px solid #21262d;
+    padding: 5px 0;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.movers-scroll {
+    display: flex;
+    gap: 32px;
+    animation: ticker-scroll 40s linear infinite;
+    white-space: nowrap;
+    padding: 0 16px;
+}
+.movers-bar:hover .movers-scroll { animation-play-state: paused; }
+@keyframes ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+.mover-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    opacity: 0.9;
+}
+.mover-symbol { font-weight: 600; color: #c9d1d9; }
+.mover-region { opacity: 0.5; font-size: 10px; }
+
+/* Status strip at page bottom */
+.status-strip {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 24px;
+    background: #010409;
+    border-top: 1px solid #21262d;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 24px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #8b949e;
+    z-index: 1000;
+}
+.status-sep { opacity: 0.3; }
+.status-active { color: #3fb950; }
+.status-warn   { color: #d29922; }
+
+/* Heatmap */
+.heatmap-outer { overflow-x: auto; padding-bottom: 8px; }
+.heatmap-table { border-collapse: separate; border-spacing: 3px; min-width: 900px; }
+.heatmap-family-label {
+    font-size: 11px;
+    white-space: nowrap;
+    padding-right: 12px;
+    color: #8b949e;
+    text-align: right;
+    min-width: 140px;
+}
+.heatmap-region-header {
+    font-size: 10px;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    padding: 4px 2px;
+    color: #8b949e;
+    max-width: 40px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.heatmap-cell {
+    width: 52px;
+    height: 36px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+    vertical-align: middle;
+}
+.heatmap-cell:hover {
+    transform: scale(1.12);
+    box-shadow: 0 0 10px rgba(88, 166, 255, 0.4);
+    z-index: 1;
+    position: relative;
+}
+.heatmap-cell.no-data { background: #161b22; color: #30363d; }
+
+/* Calculator score bar */
+.score-bar-bg {
+    background: #21262d;
+    border-radius: 3px;
+    height: 6px;
+    overflow: hidden;
+    width: 80px;
+}
+.score-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #1f6feb, #3fb950);
+    transition: width 0.4s ease;
+}
+
+/* Calculator hero savings card */
+.savings-hero {
+    background: linear-gradient(135deg, #0d2d1a 0%, #0d1117 100%);
+    border: 1px solid #3fb950;
+    border-radius: 8px;
+}
+
+/* Add bottom padding so content doesn't hide behind status strip */
+.mud-main-content { padding-bottom: 32px !important; }

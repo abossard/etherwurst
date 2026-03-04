@@ -25,6 +25,10 @@ public sealed class CollectorService(
     public int TotalRegions { get; private set; }
     public string? CurrentRegion { get; private set; }
     public string? LastError { get; private set; }
+    public int PricesChangedLastCollection { get; private set; }
+
+    /// <summary>Fired after each region completes, and after the full collection cycle.</summary>
+    public event Action? PricesUpdated;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -39,8 +43,8 @@ public sealed class CollectorService(
         }
     }
 
-    /// <summary>Refresh interval in hours. Default: every 6 hours.</summary>
-    public static int RefreshIntervalHours { get; set; } = 6;
+    /// <summary>Refresh interval in hours. Default: every 1 hour.</summary>
+    public static int RefreshIntervalHours { get; set; } = 1;
 
     public async Task CollectAllAsync(IReadOnlyList<string> regions, CancellationToken ct = default)
     {
@@ -49,13 +53,13 @@ public sealed class CollectorService(
         TotalRegions = regions.Count;
         LastError = null;
 
+        using var scope = services.CreateScope();
+        var priceCollector   = scope.ServiceProvider.GetRequiredService<RetailPriceCollector>();
+        var evictionCollector = scope.ServiceProvider.GetRequiredService<EvictionRateCollector>();
+        var db               = scope.ServiceProvider.GetRequiredService<PriceDatabase>();
+
         try
         {
-            using var scope = services.CreateScope();
-            var priceCollector = scope.ServiceProvider.GetRequiredService<RetailPriceCollector>();
-            var evictionCollector = scope.ServiceProvider.GetRequiredService<EvictionRateCollector>();
-            var db = scope.ServiceProvider.GetRequiredService<PriceDatabase>();
-
             // Collect spot prices per region
             foreach (var region in regions)
             {
@@ -74,6 +78,7 @@ public sealed class CollectorService(
                     LastError = $"Error collecting {region}: {ex.Message}";
                 }
                 RegionsCompleted++;
+                PricesUpdated?.Invoke(); // notify UI after each region
             }
 
             // Then try eviction rates (optional, needs Azure auth)
@@ -93,8 +98,11 @@ public sealed class CollectorService(
         {
             IsCollecting = false;
             CurrentRegion = null;
-            log.LogInformation("Collection complete. {Completed}/{Total} regions.",
-                RegionsCompleted, TotalRegions);
+            PricesChangedLastCollection = db.GetPricesChangedInHours(RefreshIntervalHours + 1);
+            db.CleanupOldHistory(retentionDays: 90);
+            PricesUpdated?.Invoke();
+            log.LogInformation("Collection complete. {Completed}/{Total} regions. {Changed} prices changed.",
+                RegionsCompleted, TotalRegions, PricesChangedLastCollection);
         }
     }
 }

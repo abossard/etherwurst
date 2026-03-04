@@ -38,7 +38,8 @@ public static class PricingEndpoints
                 collector.TotalRegions,
                 collector.LastError,
                 db.GetPriceCount(),
-                db.GetLastUpdate())));
+                db.GetLastUpdate(),
+                db.GetPricesChangedInHours(1))));
 
         api.MapPost("/collect", async (CollectorService collector, CancellationToken ct) =>
         {
@@ -47,6 +48,28 @@ public static class PricingEndpoints
 
             _ = Task.Run(() => collector.CollectAllAsync(CollectorService.DefaultRegions, ct), ct);
             return Results.Accepted("/api/status", new CollectResponse("Collection started"));
+        });
+
+        api.MapGet("/history/{vmSize}/{region}", (
+            PriceDatabase db, string vmSize, string region, int days = 30) =>
+            Results.Ok(db.GetPriceHistory(vmSize, region, days)));
+
+        api.MapGet("/movers", (PriceDatabase db, int hours = 24, int limit = 20) =>
+            Results.Ok(db.GetBiggestMovers(hours, limit)));
+
+        api.MapGet("/heatmap", (PriceDatabase db) =>
+            Results.Ok(db.GetHeatmapData()));
+
+        api.MapGet("/calculator", (
+            PriceDatabase db,
+            int vcpus = 4,
+            decimal memory = 16,
+            decimal hours = 730,
+            bool lowRisk = false,
+            string? regions = null) =>
+        {
+            var regionList = regions?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            return Results.Ok(db.GetCalculatorResults(vcpus, memory, hours, lowRisk, regionList));
         });
     }
 }

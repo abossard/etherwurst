@@ -16,3 +16,4 @@ resources:
   - vpa-blockscout.yaml
   - goldilocks.yaml
   - opencost.yaml
+  - spot-dashboard.yaml
