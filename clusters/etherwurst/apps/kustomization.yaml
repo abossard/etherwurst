@@ -15,3 +15,4 @@ resources:
   - vpa.yaml
   - vpa-blockscout.yaml
   - goldilocks.yaml
+  - opencost.yaml
