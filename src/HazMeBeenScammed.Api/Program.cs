@@ -12,10 +12,9 @@ builder.AddServiceDefaults();
 // ─── Adapter registry: register all available backends ───────────
 var clickhouseConn = builder.Configuration["ClickHouse:ConnectionString"];
 var erigonUrl = builder.Configuration["Erigon:RpcUrl"];
-var blockscoutUrl = builder.Configuration["Blockscout:ApiUrl"]
-                    ?? "http://blockscout.blockscout.svc.cluster.local:4000";
+var blockscoutUrl = builder.Configuration["Blockscout:ApiUrl"];
 
-// Always register Erigon + Blockscout HTTP clients if configured
+// Register HTTP clients for configured backends
 if (!string.IsNullOrEmpty(erigonUrl))
 {
     builder.Services.AddHttpClient("erigon-rpc", client =>
@@ -30,16 +29,10 @@ if (!string.IsNullOrEmpty(erigonUrl))
         options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(180);
         options.Retry.MaxRetryAttempts = 1;
     });
-
-    builder.Services.AddHttpClient("blockscout", client =>
-    {
-        client.BaseAddress = new Uri(blockscoutUrl);
-        client.Timeout = TimeSpan.FromSeconds(15);
-    });
 }
-else
+
+if (!string.IsNullOrEmpty(blockscoutUrl))
 {
-    // Register blockscout client even without Erigon (standalone mode)
     builder.Services.AddHttpClient("blockscout", client =>
     {
         client.BaseAddress = new Uri(blockscoutUrl);
@@ -68,11 +61,14 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
         registry.Register("erigon", erigonAdapter);
     }
 
-    // Blockscout adapter (with Erigon fallback for bytecode/storage)
-    var blockscoutClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("blockscout");
-    registry.Register("blockscout", new BlockscoutBlockchainAdapter(
-        blockscoutClient, erigonAdapter,
-        sp.GetRequiredService<ILogger<BlockscoutBlockchainAdapter>>()));
+    // Blockscout adapter (only if URL configured, with Erigon fallback)
+    if (!string.IsNullOrEmpty(blockscoutUrl))
+    {
+        var blockscoutClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("blockscout");
+        registry.Register("blockscout", new BlockscoutBlockchainAdapter(
+            blockscoutClient, erigonAdapter,
+            sp.GetRequiredService<ILogger<BlockscoutBlockchainAdapter>>()));
+    }
 
     // ClickHouse adapter (with Erigon fallback for live-node ops)
     if (!string.IsNullOrEmpty(clickhouseConn))
