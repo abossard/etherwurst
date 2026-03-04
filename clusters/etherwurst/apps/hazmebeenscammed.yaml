@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:0b4f2cc # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
+          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:01739b5 # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
           ports:
             - containerPort: 8080
               name: http
@@ -100,7 +100,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-web:0b4f2cc # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
+          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-web:01739b5 # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
           ports:
             - containerPort: 8080
               name: http
