@@ -83,6 +83,8 @@ hooks:
         --from-literal=AZURE_ADX_CLUSTER_URI="${AZURE_ADX_CLUSTER_URI}" \
         --from-literal=AZURE_ADX_CLUSTER_NAME="${AZURE_ADX_CLUSTER_NAME}" \
         --from-literal=AZURE_ADX_DATABASE_NAME="${AZURE_ADX_DATABASE_NAME}" \
+        --from-literal=AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID}" \
+        --from-literal=AZURE_TENANT_ID="${AZURE_TENANT_ID}" \
         --from-literal=AZURE_AKS_CLUSTER_NAME="${AZURE_AKS_CLUSTER_NAME}" \
         --from-literal=AZURE_ENV_NAME="${AZURE_ENV_NAME}" \
         --dry-run=client -o yaml | kubectl apply -f -

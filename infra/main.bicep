@@ -897,3 +897,5 @@ output AZURE_AGC_WAF_POLICY_ID string = agcWafPolicy.id
 output AZURE_ADX_CLUSTER_URI string = adxCluster.properties.uri
 output AZURE_ADX_CLUSTER_NAME string = adxCluster.name
 output AZURE_ADX_DATABASE_NAME string = adxDatabaseName
+output AZURE_SUBSCRIPTION_ID string = subscription().subscriptionId
+output AZURE_TENANT_ID string = tenant().tenantId

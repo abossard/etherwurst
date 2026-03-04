@@ -67,3 +67,13 @@ spec:
   type: default
   interval: 1h
   url: https://charts.fairwinds.com/stable
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: opencost
+  namespace: flux-system
+spec:
+  type: default
+  interval: 1h
+  url: https://opencost.github.io/opencost-helm-chart

@@ -15,6 +15,7 @@ SERVICES=(
   "ethereum:erigon:8545:8545:Erigon JSON-RPC"
   "kube-system:hubble-ui:12000:80:Hubble UI (Cilium)"
   "goldilocks:goldilocks-dashboard:8080:80:Goldilocks VPA"
+  "opencost:opencost:9003:9003:OpenCost UI"
 )
 
 start_forwards() {
