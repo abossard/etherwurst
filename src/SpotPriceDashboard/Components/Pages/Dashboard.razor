@@ -66,7 +66,7 @@
             <MudSelect T="string" Label="Regions" MultiSelection="true"
                        @bind-SelectedValues="_selectedRegions"
                        Variant="Variant.Outlined" Dense="true"
-                       AnchorOrigin="Origin.BottomCenter" Placeholder="All regions">
+                       Placeholder="All regions">
                 @foreach (var r in _availableRegions)
                 {
                     <MudSelectItem Value="@r">@RegionFormatter.Format(r)</MudSelectItem>

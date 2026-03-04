@@ -45,6 +45,12 @@
     </MudAppBar>
 
     <MudMainContent Class="pa-4" Style="padding-top: 60px !important; padding-bottom: 32px !important;">
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="false"
+                  Icon="@Icons.Material.Filled.Warning"
+                  Style="margin-bottom:16px; font-weight:600; font-size:1rem; border-radius:4px;">
+            ⚠️ BEST EFFORT — Spot VM data is provided as-is with no guarantees. Prices, availability, and eviction rates
+            can change or disappear at any time without notice. Do not rely on this for production decisions.
+        </MudAlert>
         @Body
     </MudMainContent>
 </MudLayout>
