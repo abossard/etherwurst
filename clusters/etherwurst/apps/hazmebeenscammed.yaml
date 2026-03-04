@@ -37,7 +37,7 @@ spec:
               value: "http://erigon.ethereum.svc.cluster.local:8545"
             # ClickHouse analytics DB
             - name: ClickHouse__ConnectionString
-              value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;User=etherwurst;Password=etherwurst-ch-2026"
+              value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;Username=etherwurst;Password=etherwurst-ch-2026"
           resources:
             requests:
               cpu: 100m
