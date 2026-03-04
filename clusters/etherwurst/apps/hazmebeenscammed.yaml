@@ -1,4 +1,14 @@
 # ─── API Backend ──────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hazmebeenscammed-api-sa
+  namespace: ethereum
+  annotations:
+    azure.workload.identity/client-id: "${AZURE_APP_IDENTITY_CLIENT_ID}"
+  labels:
+    azure.workload.identity/use: "true"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +30,9 @@ spec:
         app.kubernetes.io/name: hazmebeenscammed-api
         app.kubernetes.io/part-of: hazmebeenscammed
         app.kubernetes.io/component: api
+        azure.workload.identity/use: "true"
     spec:
+      serviceAccountName: hazmebeenscammed-api-sa
       containers:
         - name: api
           image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:1ae037d # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
@@ -38,6 +50,11 @@ spec:
             # ClickHouse analytics DB
             - name: ClickHouse__ConnectionString
               value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;Username=etherwurst;Password=etherwurst-ch-2026"
+            # Azure Data Explorer
+            - name: Adx__ClusterUri
+              value: "${AZURE_ADX_CLUSTER_URI}"
+            - name: Adx__Database
+              value: "${AZURE_ADX_DATABASE_NAME}"
           resources:
             requests:
               cpu: 100m

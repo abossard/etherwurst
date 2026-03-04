@@ -36,3 +36,11 @@ metadata:
   labels:
     app.kubernetes.io/part-of: etherwurst
     goldilocks.fairwinds.com/enabled: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencost
+  labels:
+    app.kubernetes.io/part-of: etherwurst
+    goldilocks.fairwinds.com/enabled: "true"

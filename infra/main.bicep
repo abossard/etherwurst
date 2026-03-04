@@ -41,6 +41,7 @@ var dashPrefix = '${projectName}-${salt}'
 var aksIdentityName = 'id-${dashPrefix}-aks'
 var albIdentityName = 'id-${dashPrefix}-alb'
 var appIdentityName = 'id-${dashPrefix}-app'
+var opencostIdentityName = 'id-${dashPrefix}-opencost'
 var logAnalyticsName = 'log-${dashPrefix}'
 var monitorWorkspaceName = 'mon-${dashPrefix}'
 var appInsightsName = 'appi-${dashPrefix}'
@@ -146,6 +147,12 @@ resource albIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-01-3
 // Workload identity for the application running on AKS
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-01-31-preview' = {
   name: appIdentityName
+  location: location
+}
+
+// Workload identity for OpenCost (Azure Rate Card API access)
+resource opencostIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-01-31-preview' = {
+  name: opencostIdentityName
   location: location
 }
 
@@ -404,6 +411,39 @@ resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdenti
     issuer: aks.properties.oidcIssuerProfile.issuerURL
     subject: 'system:serviceaccount:ethereum:adx-etl-sa'
     audiences: [workloadIdentityAudience]
+  }
+}
+
+// API pod → federated credential (Deployment in ethereum namespace)
+resource apiFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
+  name: 'api-workload-identity'
+  parent: appIdentity
+  dependsOn: [adxEtlFederatedCredential]
+  properties: {
+    issuer: aks.properties.oidcIssuerProfile.issuerURL
+    subject: 'system:serviceaccount:ethereum:hazmebeenscammed-api-sa'
+    audiences: [workloadIdentityAudience]
+  }
+}
+
+// OpenCost → federated credential (Deployment in opencost namespace)
+resource opencostFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
+  name: 'opencost-workload-identity'
+  parent: opencostIdentity
+  properties: {
+    issuer: aks.properties.oidcIssuerProfile.issuerURL
+    subject: 'system:serviceaccount:opencost:opencost'
+    audiences: [workloadIdentityAudience]
+  }
+}
+
+// OpenCost needs Reader on the subscription for Azure Rate Card API
+resource opencostReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, opencostIdentity.id, roleIds.reader)
+  properties: {
+    principalId: opencostIdentity.properties.principalId
+    roleDefinitionId: roleDefs.reader
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -843,6 +883,7 @@ output AZURE_CONTAINER_REGISTRY_NAME string = acr.name
 output AZURE_ALB_IDENTITY_CLIENT_ID string = albIdentity.properties.clientId
 output AZURE_APP_IDENTITY_CLIENT_ID string = appIdentity.properties.clientId
 output AZURE_APP_IDENTITY_NAME string = appIdentity.name
+output AZURE_OPENCOST_IDENTITY_CLIENT_ID string = opencostIdentity.properties.clientId
 output AZURE_OPENAI_ENDPOINT string = aiFoundry.properties.endpoint
 output AZURE_OPENAI_ACCOUNT_NAME string = aiFoundry.name
 output AZURE_AI_FOUNDRY_PROJECT_NAME string = aiFoundryProject.name

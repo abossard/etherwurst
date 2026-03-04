@@ -13,6 +13,8 @@ builder.AddServiceDefaults();
 var clickhouseConn = builder.Configuration["ClickHouse:ConnectionString"];
 var erigonUrl = builder.Configuration["Erigon:RpcUrl"];
 var blockscoutUrl = builder.Configuration["Blockscout:ApiUrl"];
+var adxClusterUri = builder.Configuration["Adx:ClusterUri"];
+var adxDatabase = builder.Configuration["Adx:Database"] ?? "ethereum";
 
 // Register HTTP clients for configured backends
 if (!string.IsNullOrEmpty(erigonUrl))
@@ -44,7 +46,8 @@ if (!string.IsNullOrEmpty(blockscoutUrl))
 builder.Services.AddSingleton<IAdapterRegistry>(sp =>
 {
     // Determine default: best available backend
-    var defaultBackend = !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
+    var defaultBackend = !string.IsNullOrEmpty(adxClusterUri) ? "adx"
+        : !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
         : !string.IsNullOrEmpty(erigonUrl) ? "erigon"
         : !string.IsNullOrEmpty(blockscoutUrl) ? "blockscout"
         : "fake";
@@ -76,6 +79,14 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
         registry.Register("clickhouse", new ClickHouseBlockchainAdapter(
             clickhouseConn, erigonAdapter,
             sp.GetRequiredService<ILogger<ClickHouseBlockchainAdapter>>()));
+    }
+
+    // ADX adapter (with Erigon fallback for live-node ops)
+    if (!string.IsNullOrEmpty(adxClusterUri))
+    {
+        registry.Register("adx", new AdxBlockchainAdapter(
+            adxClusterUri, adxDatabase, erigonAdapter,
+            sp.GetRequiredService<ILogger<AdxBlockchainAdapter>>()));
     }
 
     // Fake adapter only when no real backends are configured (integration tests)
