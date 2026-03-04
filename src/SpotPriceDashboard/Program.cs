@@ -20,7 +20,6 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<CollectorService>(
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
-builder.Services.AddApexCharts();
 
 // ── JSON serialization for trimmed build ──
 builder.Services.ConfigureHttpJsonOptions(o =>

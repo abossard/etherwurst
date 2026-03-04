@@ -38,14 +38,14 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="4" md="1" Class="d-flex align-end">
-            <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Primary"
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Color="MudBlazor.Color.Primary"
                            Variant="Variant.Filled" OnClick="LoadHistory"
                            Disabled='@(string.IsNullOrWhiteSpace(_vmSize) || string.IsNullOrWhiteSpace(_region))' />
         </MudItem>
     </MudGrid>
 </MudPaper>
 
-@if (_loading) { <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" /> }
+@if (_loading) { <MudProgressLinear Indeterminate="true" Color="MudBlazor.Color.Primary" Class="mb-3" /> }
 
 @if (_history.Count > 0)
 {
