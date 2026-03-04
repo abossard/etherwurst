@@ -40,7 +40,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: premium-ssd-retain
+  storageClassName: managed-csi
   resources:
     requests:
       storage: 2Gi
