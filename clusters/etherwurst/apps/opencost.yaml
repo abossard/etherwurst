@@ -1,4 +1,36 @@
 ---
+# Azure pricing config for OpenCost
+# CPU/RAM ratios used for allocation; total node cost from Azure Retail API.
+# Storage and network egress values used directly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencost-pricing
+  namespace: opencost
+data:
+  azure.json: |
+    {
+      "provider": "custom",
+      "description": "Azure Germany West Central. Retail API used for total node cost; these ratios split CPU/RAM/GPU. Storage and network values used directly.",
+      "CPU": "0.044",
+      "spotCPU": "0.013",
+      "RAM": "0.0055",
+      "spotRAM": "0.0015",
+      "GPU": "0.95",
+      "storage": "0.00016438",
+      "zoneNetworkEgress": "0.01",
+      "regionNetworkEgress": "0.02",
+      "internetNetworkEgress": "0.087",
+      "natGatewayEgress": "0.045",
+      "natGatewayIngress": "0.045",
+      "spotLabel": "kubernetes.azure.com/scalesetpriority",
+      "spotLabelValue": "spot",
+      "azureSubscriptionID": "${AZURE_SUBSCRIPTION_ID}",
+      "azureClientID": "${AZURE_OPENCOST_IDENTITY_CLIENT_ID}",
+      "azureClientSecret": "",
+      "azureTenantID": "${AZURE_TENANT_ID}"
+    }
+---
 # Minimal Prometheus for OpenCost (scrapes kubelet/cadvisor/kube-state-metrics)
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -86,19 +118,18 @@ spec:
             memory: "256Mi"
         image:
           tag: "1.119.2"
+        # Mount azure.json pricing config
+        extraVolumeMounts:
+          - name: pricing-config
+            mountPath: /var/configs
+      extraVolumes:
+        - name: pricing-config
+          configMap:
+            name: opencost-pricing
 
-      # Azure Germany West Central pricing (retail API fallback)
+      # Custom pricing ratios for Azure (retail API still used for total node cost)
       customPricing:
-        enabled: true
-        costModel:
-          description: "Azure Germany West Central pricing"
-          CPU: "0.0440"
-          RAM: "0.0055"
-          storage: "0.00016438"
-          GPU: "0.95"
-          zoneNetworkEgress: "0.01"
-          regionNetworkEgress: "0.02"
-          internetNetworkEgress: "0.087"
+        enabled: false
 
       prometheus:
         internal:
