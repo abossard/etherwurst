@@ -177,7 +177,7 @@ public sealed class AdxBlockchainAdapter : IBlockchainAnalyticsPort, IDisposable
         var hash = reader.GetString(0);           // transaction_hash
         var from = reader.GetString(1);           // from_address
         var to = reader.IsDBNull(2) ? "" : reader.GetString(2); // to_address
-        var valueEth = reader.IsDBNull(3) ? 0m : (decimal)reader.GetDouble(3); // value_f64
+        var valueWei = reader.IsDBNull(3) ? 0.0 : reader.GetDouble(3); // value_f64 (wei)
         var success = reader.GetBoolean(4);       // success
         var timestamp = reader.IsDBNull(5) ? 0L : reader.GetInt64(5); // timestamp (unix)
         var inputData = reader.IsDBNull(6) ? null : reader.GetString(6); // input
@@ -185,7 +185,7 @@ public sealed class AdxBlockchainAdapter : IBlockchainAnalyticsPort, IDisposable
 
         return new TransactionInfo(
             Hash: hash, From: from, To: to,
-            ValueEth: Math.Round(valueEth, 6),
+            ValueEth: Math.Round((decimal)(valueWei / 1e18), 6),
             TokenSymbol: "", TokenAmount: 0m,
             IsContractInteraction: !string.IsNullOrEmpty(inputData) && inputData != "0x",
             ContractName: null,
@@ -199,14 +199,14 @@ public sealed class AdxBlockchainAdapter : IBlockchainAnalyticsPort, IDisposable
         var hash = GetStringOrEmpty(reader, "tx_hash");
         var from = GetStringOrEmpty(reader, "from_address");
         var to = GetStringOrEmpty(reader, "to_address");
-        var valueEth = GetDoubleOrZero(reader, "value_f64");
+        var valueWei = GetDoubleOrZero(reader, "value_f64");
         var success = GetBoolOrFalse(reader, "success");
         var timestamp = GetLongOrZero(reader, "timestamp");
         var inputData = GetStringOrEmpty(reader, "input");
 
         return new TransactionInfo(
             Hash: hash, From: from, To: to,
-            ValueEth: Math.Round((decimal)valueEth, 6),
+            ValueEth: Math.Round((decimal)(valueWei / 1e18), 6),
             TokenSymbol: "", TokenAmount: 0m,
             IsContractInteraction: !string.IsNullOrEmpty(inputData) && inputData != "0x",
             ContractName: null,
