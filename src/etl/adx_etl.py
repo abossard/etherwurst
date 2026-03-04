@@ -74,19 +74,29 @@ LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
 WORK_DIR = "/tmp/cryo-extract"
 
 # cryo dataset → ADX table / ClickHouse table mapping
-DATASETS = {
+ALL_DATASETS = {
     "blocks": "Blocks",
     "transactions": "Transactions",
     "logs": "Logs",
     "contracts": "Contracts",
 }
 # ClickHouse uses lowercase table names
-CH_TABLES = {
+ALL_CH_TABLES = {
     "blocks": "blocks",
     "transactions": "transactions",
     "logs": "logs",
     "contracts": "contracts",
 }
+
+# Optional filter: EXTRACT_DATASETS=contracts,blocks → only those datasets
+_ds_filter = os.environ.get("EXTRACT_DATASETS", "")
+if _ds_filter:
+    _wanted = {d.strip() for d in _ds_filter.split(",")}
+    DATASETS = {k: v for k, v in ALL_DATASETS.items() if k in _wanted}
+    CH_TABLES = {k: v for k, v in ALL_CH_TABLES.items() if k in _wanted}
+else:
+    DATASETS = ALL_DATASETS
+    CH_TABLES = ALL_CH_TABLES
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
