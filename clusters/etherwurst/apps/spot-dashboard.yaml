@@ -39,7 +39,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: ${ACR_LOGIN_SERVER}/spot-dashboard:a574838-1772616213 # {"$imagepolicy": "flux-system:spot-dashboard"}
+          image: ${ACR_LOGIN_SERVER}/spot-dashboard:f55fa81 # {"$imagepolicy": "flux-system:spot-dashboard"}
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
