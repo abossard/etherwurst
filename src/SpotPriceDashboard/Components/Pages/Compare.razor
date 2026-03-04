@@ -45,16 +45,25 @@
         — <strong style="color: #4caf50">green = cheapest region</strong>
     </MudText>
 
-    <MudSimpleTable Dense="true" Hover="true" Striped="true" FixedHeader="true"
-                    Style="max-height: calc(100vh - 380px); overflow-y: auto;">
+    <MudSimpleTable Dense="true" Hover="true" FixedHeader="true"
+                    Style="max-height: calc(100vh - 380px); overflow-y: auto; table-layout: fixed; width: 100%;">
+        <colgroup>
+            <col style="width: 240px;" />
+            <col style="width: 70px;" />
+            <col style="width: 80px;" />
+            @foreach (var _ in _selectedRegions)
+            {
+                <col style="width: @(Math.Max(140, (int)((100.0 - 30) / _selectedRegions.Count())))px;" />
+            }
+        </colgroup>
         <thead>
             <tr>
-                <th>VM</th>
-                <th>vCPUs</th>
-                <th>RAM</th>
+                <th style="text-align:left;">VM</th>
+                <th style="text-align:center;">vCPUs</th>
+                <th style="text-align:center;">RAM</th>
                 @foreach (var region in _selectedRegions)
                 {
-                    <th>@FormatRegion(region)</th>
+                    <th style="text-align:right;">@FormatRegion(region)</th>
                 }
             </tr>
         </thead>
@@ -62,28 +71,25 @@
             @foreach (var row in _comparisonData)
             {
                 <tr>
-                    <td>
-                        <strong>@row.Category</strong><br />
-                        <span style="font-size: 0.8em; opacity: 0.6">@row.VmSize</span>
+                    <td style="vertical-align:middle; overflow:hidden; text-overflow:ellipsis;">
+                        <div style="font-weight:600; font-size:0.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">@row.Category</div>
+                        <div style="font-size:0.75rem; opacity:0.55; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'JetBrains Mono',monospace;">@row.VmSize</div>
                     </td>
-                    <td>@row.VCpus</td>
-                    <td>@row.MemoryGB GB</td>
+                    <td style="text-align:center; vertical-align:middle;">@row.VCpus</td>
+                    <td style="text-align:center; vertical-align:middle; white-space:nowrap;">@row.MemoryGB GB</td>
                     @foreach (var region in _selectedRegions)
                     {
                         var price = row.RegionPrices.GetValueOrDefault(region);
                         var isCheapest = price.HasValue && price == row.RegionPrices.Values.Where(v => v.HasValue).Min();
-                        <td style="@(isCheapest ? "background-color: rgba(76,175,80,0.2); font-weight: bold;" : "")">
+                        <td style="text-align:right; vertical-align:middle; white-space:nowrap; @(isCheapest ? "background-color:rgba(76,175,80,0.18);" : "")">
                             @if (price.HasValue)
                             {
-                                <span>$@price.Value.ToString("F4")/hr</span>
-                                <br />
-                                <span style="font-size: 0.8em; opacity: 0.6">
-                                    $@PriceCalculations.MonthlyCost(price.Value).ToString("F2")/mo
-                                </span>
+                                <div style="font-weight:@(isCheapest ? "700" : "400"); font-size:0.9rem;">$@price.Value.ToString("F4")/hr</div>
+                                <div style="font-size:0.75rem; opacity:0.55;">$@PriceCalculations.MonthlyCost(price.Value).ToString("F2")/mo</div>
                             }
                             else
                             {
-                                <span style="opacity: 0.3">—</span>
+                                <span style="opacity:0.3;">—</span>
                             }
                         </td>
                     }
