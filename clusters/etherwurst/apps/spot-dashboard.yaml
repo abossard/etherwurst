@@ -1,5 +1,7 @@
 # ─── Self-signed ClusterIssuer ─────────────────────────────────────────────
-# Used for spot-dashboard HTTPS (self-signed cert — no DNS required).
+# Used for azurespotty.com HTTPS (self-signed cert — Let's Encrypt can be added later).
+# To switch to Let's Encrypt: change issuerRef.name to letsencrypt-prod
+# and add cert-manager.io/cluster-issuer annotation to the gateway listener.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -8,26 +10,25 @@ spec:
   selfSigned: {}
 ---
 # ─── TLS Certificate ────────────────────────────────────────────────────────
-# cert-manager generates a self-signed cert and stores it in the Secret below.
-# The Secret is created in the spot-dashboard namespace so the Gateway can use it.
+# Secret lives in 'ethereum' namespace — same ns as etherwurst-gateway.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: spot-dashboard-cert
-  namespace: spot-dashboard
+  name: azurespotty-cert
+  namespace: ethereum
 spec:
-  secretName: spot-dashboard-tls
+  secretName: azurespotty-tls
   issuerRef:
     name: selfsigned-issuer
     kind: ClusterIssuer
-  commonName: spot-dashboard.local
+  commonName: azurespotty.com
   dnsNames:
-    - spot-dashboard.local
-    - spot-dashboard
+    - azurespotty.com
+    - www.azurespotty.com
   duration: 8760h   # 1 year
   renewBefore: 720h # renew 30 days before expiry
 ---
-# ─── Persistent Volume Claim — SQLite data ─────────────────────────────────
+# ─── Persistent Volume Claim ─────────────────────────────────────────────────
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -44,7 +45,7 @@ spec:
     requests:
       storage: 2Gi
 ---
-# ─── Deployment ─────────────────────────────────────────────────────────────
+# ─── Deployment ──────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -110,7 +111,7 @@ spec:
           persistentVolumeClaim:
             claimName: spot-dashboard-data
 ---
-# ─── Service ────────────────────────────────────────────────────────────────
+# ─── Service ─────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -128,67 +129,30 @@ spec:
       protocol: TCP
       name: http
 ---
-# ─── Gateway — gets its own public IP from NGINX Gateway Fabric ────────────
-# A separate Gateway means a separate Azure LoadBalancer IP (no conflicts with
-# the existing etherwurst-gateway that serves checkmyethereum.com).
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
+# ─── Flux ImageRepository ────────────────────────────────────────────────────
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
 metadata:
-  name: spot-dashboard-gateway
-  namespace: spot-dashboard
+  name: spot-dashboard
+  namespace: flux-system
 spec:
-  gatewayClassName: nginx
-  listeners:
-    - name: http
-      port: 80
-      protocol: HTTP
-      allowedRoutes:
-        namespaces:
-          from: Same
-    - name: https
-      port: 443
-      protocol: HTTPS
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - kind: Secret
-            name: spot-dashboard-tls
-      allowedRoutes:
-        namespaces:
-          from: Same
+  image: ${ACR_LOGIN_SERVER}/spot-dashboard
+  interval: 5m
+  secretRef:
+    name: acr-credentials
 ---
-# ─── HTTPRoute: HTTP → HTTPS redirect ───────────────────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+# ─── Flux ImagePolicy ────────────────────────────────────────────────────────
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
 metadata:
-  name: spot-dashboard-http-redirect
-  namespace: spot-dashboard
+  name: spot-dashboard
+  namespace: flux-system
 spec:
-  parentRefs:
-    - name: spot-dashboard-gateway
-      sectionName: http
-  rules:
-    - filters:
-        - type: RequestRedirect
-          requestRedirect:
-            scheme: https
-            statusCode: 301
----
-# ─── HTTPRoute: HTTPS → service ─────────────────────────────────────────────
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: spot-dashboard-https
-  namespace: spot-dashboard
-spec:
-  parentRefs:
-    - name: spot-dashboard-gateway
-      sectionName: https
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: spot-dashboard
-          port: 80
+  imageRepositoryRef:
+    name: spot-dashboard
+  filterTags:
+    pattern: '^[a-f0-9]+-(?P<ts>[0-9]+)$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc

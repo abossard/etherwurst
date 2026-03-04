@@ -27,6 +27,27 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
+    # ── azurespotty.com — self-signed for now, Let's Encrypt can be added later ──
+    - name: spotty-http
+      port: 80
+      protocol: HTTP
+      hostname: azurespotty.com
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: spotty-https
+      port: 443
+      protocol: HTTPS
+      hostname: azurespotty.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: azurespotty-tls
+            namespace: ethereum
+      allowedRoutes:
+        namespaces:
+          from: All
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -64,4 +85,46 @@ spec:
             value: /
       backendRefs:
         - name: hazmebeenscammed-web
+          port: 80
+---
+# ── azurespotty.com: HTTP → HTTPS redirect ──────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: spotty-http-redirect
+  namespace: spot-dashboard
+spec:
+  hostnames:
+    - azurespotty.com
+  parentRefs:
+    - name: etherwurst-gateway
+      namespace: ethereum
+      sectionName: spotty-http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# ── azurespotty.com: HTTPS → spot-dashboard service ─────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: spotty-https
+  namespace: spot-dashboard
+spec:
+  hostnames:
+    - azurespotty.com
+  parentRefs:
+    - name: etherwurst-gateway
+      namespace: ethereum
+      sectionName: spotty-https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: spot-dashboard
           port: 80
