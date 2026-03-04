@@ -67,3 +67,18 @@ CREATE TABLE IF NOT EXISTS etl_progress (
     updated_at DateTime
 ) ENGINE = ReplacingMergeTree()
 ORDER BY dataset;
+
+CREATE TABLE IF NOT EXISTS contracts (
+    block_number UInt64,
+    create_index UInt64,
+    transaction_hash String,
+    contract_address String,
+    deployer String,
+    factory String,
+    init_code String,
+    code String,
+    init_code_hash String,
+    code_hash String,
+    chain_id UInt64
+) ENGINE = ReplacingMergeTree()
+ORDER BY (block_number, create_index);

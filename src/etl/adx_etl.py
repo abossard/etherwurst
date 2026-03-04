@@ -78,12 +78,14 @@ DATASETS = {
     "blocks": "Blocks",
     "transactions": "Transactions",
     "logs": "Logs",
+    "contracts": "Contracts",
 }
 # ClickHouse uses lowercase table names
 CH_TABLES = {
     "blocks": "blocks",
     "transactions": "transactions",
     "logs": "logs",
+    "contracts": "contracts",
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
