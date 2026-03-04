@@ -283,8 +283,8 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
     agentPoolProfiles: [
       {
         name: 'system'
-        count: 1
-        vmSize: 'Standard_B2s'
+        count: 2
+        vmSize: 'Standard_D2s_v5'
         mode: 'System'
         osType: 'Linux'
         osSKU: 'AzureLinux'
