@@ -87,6 +87,19 @@ spec:
         image:
           tag: "1.119.2"
 
+      # Azure Germany West Central pricing (retail API fallback)
+      customPricing:
+        enabled: true
+        costModel:
+          description: "Azure Germany West Central pricing"
+          CPU: "0.0440"
+          RAM: "0.0055"
+          storage: "0.00016438"
+          GPU: "0.95"
+          zoneNetworkEgress: "0.01"
+          regionNetworkEgress: "0.02"
+          internetNetworkEgress: "0.087"
+
       prometheus:
         internal:
           enabled: true

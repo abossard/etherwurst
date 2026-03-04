@@ -45,10 +45,12 @@ if (!string.IsNullOrEmpty(blockscoutUrl))
 // Build the registry with all configured adapters
 builder.Services.AddSingleton<IAdapterRegistry>(sp =>
 {
-    // Determine default: best available backend
-    var defaultBackend = !string.IsNullOrEmpty(adxClusterUri) ? "adx"
-        : !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
+    // Default backend: explicit env var, or first available
+    var configuredDefault = builder.Configuration["DefaultBackend"];
+    var defaultBackend = !string.IsNullOrEmpty(configuredDefault) ? configuredDefault
         : !string.IsNullOrEmpty(erigonUrl) ? "erigon"
+        : !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
+        : !string.IsNullOrEmpty(adxClusterUri) ? "adx"
         : !string.IsNullOrEmpty(blockscoutUrl) ? "blockscout"
         : "fake";
 
@@ -141,6 +143,17 @@ app.MapGet("/api/backends", (IAdapterRegistry registry) =>
 .WithTags("Config")
 .WithSummary("List available blockchain data backends");
 
+// GET /api/examples — sample addresses & tx hashes for the UI (configurable via Examples section)
+app.MapGet("/api/examples", (IConfiguration config) =>
+{
+    var examples = config.GetSection("Examples").Get<List<ExampleEntry>>()
+        ?? DefaultExamples.All;
+    return Results.Ok(examples);
+})
+.WithName("ListExamples")
+.WithTags("Config")
+.WithSummary("Sample wallet addresses and transaction hashes for quick testing");
+
 // POST /api/analyze — starts analysis and streams SSE events
 app.MapGet("/api/analyze", async (
     string input,
@@ -220,3 +233,26 @@ app.Run();
 
 // Make Program accessible for integration testing
 public partial class Program { }
+
+// ─── Example entries served to the UI ────────────────────────────
+record ExampleEntry(string Label, string Value, string? Icon = null, string? Backend = null);
+
+static class DefaultExamples
+{
+    public static readonly List<ExampleEntry> All =
+    [
+        // Original samples (work with any backend / Erigon)
+        new("Sample Wallet", "0x60d0da6875CA73C6656a38cf76ffB8b3A9AEB57C", "🦊"),
+        new("Sample Tx (first ERC-20)", "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b", "📋"),
+
+        // ClickHouse — recent blocks (~24.5 M)
+        new("Whale (5.5k ETH)", "0xa9ac43f5b5e38155a288d1a01d2cbc4478e14573", "🐋", "clickhouse"),
+        new("High-volume sender", "0x9696f59e4d72e237be84ffd425dcad154bf96976", "🔁", "clickhouse"),
+        new("5546 ETH transfer", "0x9f7f9a6eb59265ee9fe1ef3a8864c6e0aa0a771bbe8eac85230a09cc36c7cfb5", "💸", "clickhouse"),
+
+        // ADX — early blockchain (blocks ~3.7 M, 2017)
+        new("Ethermine pool (2017)", "0x52bc44d5378309ee2abf1539bf71de1b7d7be3b5", "⛏️", "adx"),
+        new("Poloniex (2017)", "0x32be343b94f860124dc4fee278fdcbd38c102d88", "🏦", "adx"),
+        new("327k ETH tx", "0x60362978cf905d475780015593dfc30c3b7ec3cb4a8b692deecddddc7223bf16", "🔥", "adx"),
+    ];
+}

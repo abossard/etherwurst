@@ -47,12 +47,14 @@
         </div>
         <div class="sample-inputs">
             <span class="text-muted me-2">Try a sample:</span>
-            <button class="btn btn-sm btn-outline-secondary me-1" @onclick='() => SetSample("0x60d0da6875CA73C6656a38cf76ffB8b3A9AEB57C")'>
-                🦊 Sample Wallet
-            </button>
-            <button class="btn btn-sm btn-outline-secondary" @onclick='() => SetSample("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b")'>
-                📋 Sample Tx
-            </button>
+            @foreach (var ex in SampleEntries)
+            {
+                <button class="btn btn-sm btn-outline-secondary me-1"
+                        title="@(ex.Backend is not null ? $"Best with {ex.Backend}" : "Any backend")"
+                        @onclick="() => SetSample(ex.Value, ex.Backend)">
+                    @(ex.Icon ?? "📌") @ex.Label
+                </button>
+            }
         </div>
 
     </div>
@@ -201,6 +203,11 @@
     private bool DeepAnalysisInProgress { get; set; }
     private string SelectedBackend { get; set; } = "";
     private List<string> AvailableBackends { get; set; } = new() { "fake" };
+    private List<ExampleEntry> SampleEntries { get; set; } = new()
+    {
+        new("Sample Wallet", "0x60d0da6875CA73C6656a38cf76ffB8b3A9AEB57C", "🦊", null),
+        new("Sample Tx", "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b", "📋", null),
+    };
 
     private List<AnalysisProgressEvent> Events { get; } = [];
     private AnalysisProgressEvent? LatestEvent => Events.LastOrDefault();
@@ -228,6 +235,9 @@
                 AvailableBackends = resp.Available.ToList();
                 SelectedBackend = resp.Default;
             }
+            var examples = await client.GetFromJsonAsync<List<ExampleEntry>>("/api/examples");
+            if (examples is not null && examples.Count > 0)
+                SampleEntries = examples;
         }
         catch
         {
@@ -235,9 +245,11 @@
         }
     }
 
-    private void SetSample(string sample)
+    private void SetSample(string sample, string? backend = null)
     {
         InputValue = sample;
+        if (!string.IsNullOrEmpty(backend) && AvailableBackends.Contains(backend))
+            SelectedBackend = backend;
         StateHasChanged();
     }
 
@@ -455,5 +467,6 @@
     private enum ScamSeverity { Info, Warning, High, Critical }
 
     private record BackendsResponse(string[] Available, string Default);
+    private record ExampleEntry(string Label, string Value, string? Icon = null, string? Backend = null);
 }
 
