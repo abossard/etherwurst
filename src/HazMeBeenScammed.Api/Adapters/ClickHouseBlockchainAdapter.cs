@@ -45,11 +45,12 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         var sql = $"""
             SELECT
-                hash, from_addr, to_addr, value,
-                status, block_timestamp, input, gas_used
-            FROM ethereum.transactions
-            WHERE from_addr IN ({inClause}) OR to_addr IN ({inClause})
-            ORDER BY block_timestamp DESC
+                t.transaction_hash, t.from_address, t.to_address, t.value_f64,
+                t.success, b.timestamp, t.input, t.gas_used
+            FROM default.transactions t
+            JOIN default.blocks b ON t.block_number = b.block_number
+            WHERE t.from_address IN ({inClause}) OR t.to_address IN ({inClause})
+            ORDER BY t.block_number DESC
             LIMIT {wallets.Count * 666}
             """;
 
@@ -89,10 +90,11 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
 
         var sql = $"""
             SELECT
-                hash, from_addr, to_addr, value,
-                status, block_timestamp, input, gas_used
-            FROM ethereum.transactions
-            WHERE hash IN ({inClause})
+                t.transaction_hash, t.from_address, t.to_address, t.value_f64,
+                t.success, b.timestamp, t.input, t.gas_used
+            FROM default.transactions t
+            JOIN default.blocks b ON t.block_number = b.block_number
+            WHERE t.transaction_hash IN ({inClause})
             """;
 
         await using var conn = new ClickHouseConnection(_connectionString);
@@ -149,14 +151,22 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
     {
         var hash = reader.GetString(0);
         var from = reader.GetString(1);
-        var to = reader.GetString(2);
+        var to = reader.IsDBNull(2) ? "" : reader.GetString(2);
         var valueRaw = reader.GetValue(3);
         var statusRaw = reader.GetValue(4);
-        var timestamp = reader.GetDateTime(5);
+        var timestampRaw = reader.GetValue(5);
         var inputData = reader.IsDBNull(6) ? null : reader.GetString(6);
         var gasUsed = reader.IsDBNull(7) ? 0UL : Convert.ToUInt64(reader.GetValue(7));
 
-        var valueEth = ConvertToEth(valueRaw);
+        // value_f64 is Wei as Float64 — convert to ETH
+        var valueEth = valueRaw switch
+        {
+            double d => (decimal)(d / 1e18),
+            float f => (decimal)(f / 1e18),
+            decimal dec => dec / 1_000_000_000_000_000_000m,
+            _ => ConvertToEth(valueRaw)
+        };
+
         var isContract = !string.IsNullOrEmpty(inputData) && inputData != "0x";
 
         var status = statusRaw switch
@@ -164,6 +174,19 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
             1 or 1UL or (byte)1 => "Success",
             0 or 0UL or (byte)0 => "Failed",
             _ => statusRaw?.ToString() == "1" ? "Success" : "Pending"
+        };
+
+        // blocks.timestamp is UInt32 unix epoch
+        var timestamp = timestampRaw switch
+        {
+            uint u => DateTimeOffset.FromUnixTimeSeconds(u),
+            ulong ul => DateTimeOffset.FromUnixTimeSeconds((long)ul),
+            int i => DateTimeOffset.FromUnixTimeSeconds(i),
+            long l => DateTimeOffset.FromUnixTimeSeconds(l),
+            DateTime dt => new DateTimeOffset(dt, TimeSpan.Zero),
+            _ => long.TryParse(timestampRaw?.ToString(), out var ts)
+                ? DateTimeOffset.FromUnixTimeSeconds(ts)
+                : DateTimeOffset.UtcNow
         };
 
         return new TransactionInfo(
@@ -175,7 +198,7 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
             TokenAmount: 0m,
             IsContractInteraction: isContract,
             ContractName: null,
-            Timestamp: new DateTimeOffset(timestamp, TimeSpan.Zero),
+            Timestamp: timestamp,
             Status: status,
             InputData: inputData
         );

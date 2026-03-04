@@ -52,7 +52,7 @@ spec:
               value: "clickhouse"
             # ClickHouse analytics DB
             - name: ClickHouse__ConnectionString
-              value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;Username=etherwurst;Password=etherwurst-ch-2026"
+              value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=default;Username=etherwurst;Password=etherwurst-ch-2026"
           resources:
             requests:
               cpu: 100m
