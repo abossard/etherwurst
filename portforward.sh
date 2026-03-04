@@ -13,6 +13,7 @@ SERVICES=(
   "monitoring:prometheus-prometheus:9090:9090:Prometheus"
   "flux-system:flux-operator:9080:9080:Flux UI"
   "ethereum:erigon:8545:8545:Erigon JSON-RPC"
+  "ethereum:clickhouse-ethereum-analytics:8123:8123:ClickHouse HTTP+Play UI"
   "kube-system:hubble-ui:12000:80:Hubble UI (Cilium)"
   "goldilocks:goldilocks-dashboard:8080:80:Goldilocks VPA"
   "opencost:opencost:9003:9003:OpenCost UI"
