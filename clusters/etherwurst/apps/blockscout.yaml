@@ -4,6 +4,7 @@ metadata:
   name: blockscout
   namespace: blockscout
 spec:
+  suspend: true  # undeployed — set to false to activate
   interval: 1h
   timeout: 15m
   install:
@@ -23,6 +24,9 @@ spec:
         namespace: flux-system
   values:
     fullnameOverride: blockscout
+    image:
+      repository: blockscout/blockscout
+      tag: "v10.0.1"
     config:
       ETHEREUM_JSONRPC_HTTP_URL: http://erigon.ethereum.svc.cluster.local:8545
       ETHEREUM_JSONRPC_TRACE_URL: http://erigon.ethereum.svc.cluster.local:8545
@@ -32,10 +36,12 @@ spec:
       COIN: ETH
       NETWORK: Ethereum
       SUBNETWORK: Mainnet
+      FIRST_BLOCK: "23500000"
+      TRACE_FIRST_BLOCK: "23500000"
     resources:
       requests:
         cpu: "500m"
-        memory: "1Gi"
+        memory: "2Gi"
       limits:
         cpu: "2"
         memory: "4Gi"
@@ -44,8 +50,8 @@ spec:
       image:
         registry: docker.io
         repository: bitnami/postgresql
-        tag: "latest"
+        tag: "16"
       persistence:
         enabled: true
         storageClass: managed-csi-premium
-        size: 50Gi
+        size: 500Gi
