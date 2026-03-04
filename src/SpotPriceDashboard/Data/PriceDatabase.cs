@@ -21,6 +21,8 @@ public sealed class PriceDatabase : IDisposable
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
+            PRAGMA auto_vacuum = INCREMENTAL;
+
             CREATE TABLE IF NOT EXISTS spot_prices (
                 vm_size       TEXT NOT NULL,
                 region        TEXT NOT NULL,
@@ -47,6 +49,32 @@ public sealed class PriceDatabase : IDisposable
                 started_at TEXT NOT NULL,
                 finished_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS price_history (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                vm_size        TEXT NOT NULL,
+                region         TEXT NOT NULL,
+                spot_price     REAL NOT NULL,
+                ondemand_price REAL,
+                recorded_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_ph_vm_region ON price_history(vm_size, region);
+            CREATE INDEX IF NOT EXISTS idx_ph_recorded  ON price_history(recorded_at);
+
+            CREATE TRIGGER IF NOT EXISTS record_price_change
+            AFTER UPDATE ON spot_prices
+            WHEN OLD.spot_price != NEW.spot_price
+            BEGIN
+                INSERT INTO price_history (vm_size, region, spot_price, ondemand_price)
+                VALUES (NEW.vm_size, NEW.region, NEW.spot_price, NEW.ondemand_price);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS record_initial_price
+            AFTER INSERT ON spot_prices
+            BEGIN
+                INSERT INTO price_history (vm_size, region, spot_price, ondemand_price)
+                VALUES (NEW.vm_size, NEW.region, NEW.spot_price, NEW.ondemand_price);
+            END;
         """;
         cmd.ExecuteNonQuery();
     }

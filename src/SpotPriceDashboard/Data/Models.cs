@@ -174,7 +174,44 @@ public sealed record CollectionStatus(
     int TotalRegions,
     string? LastError,
     int TotalPrices,
-    DateTime? LastUpdate);
+    DateTime? LastUpdate,
+    int PricesChangedLastHour);
+
+// ── Trading / history feature types ──
+
+public sealed record PriceHistoryPoint(DateTime RecordedAt, decimal SpotPrice);
+
+public sealed record BigMover(
+    string VmSize,
+    string Region,
+    string FriendlyCategory,
+    int VCpus,
+    decimal MemoryGB,
+    decimal CurrentPrice,
+    decimal PreviousPrice,
+    decimal ChangePercent);
+
+public sealed record HeatmapCell(
+    string Family,
+    string Region,
+    decimal SavingsPct,
+    decimal AvgSpot,
+    int Count);
+
+public sealed record CalculatorResult(
+    string VmSize,
+    string Region,
+    string FriendlyCategory,
+    int VCpus,
+    decimal MemoryGB,
+    decimal SpotPricePerHour,
+    decimal OnDemandPricePerHour,
+    decimal SavingsPct,
+    string? EvictionRate,
+    decimal Score,
+    decimal MonthlySpot,
+    decimal MonthlyOnDemand,
+    decimal MonthlySavings);
 
 public sealed class ResourceGraphColumn
 {

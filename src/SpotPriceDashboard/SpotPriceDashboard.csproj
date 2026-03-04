@@ -10,6 +10,7 @@
     <PackageReference Include="MudBlazor" Version="8.*" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
     <PackageReference Include="Azure.Identity" Version="1.*" />
+    <PackageReference Include="Blazor-ApexCharts" Version="3.*" />
   </ItemGroup>
 
 </Project>

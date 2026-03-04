@@ -16,6 +16,10 @@ public partial class AzureApiJsonContext : JsonSerializerContext;
 [JsonSerializable(typeof(List<RegionInfo>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(List<PriceHistoryPoint>))]
+[JsonSerializable(typeof(List<BigMover>))]
+[JsonSerializable(typeof(List<HeatmapCell>))]
+[JsonSerializable(typeof(List<CalculatorResult>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
