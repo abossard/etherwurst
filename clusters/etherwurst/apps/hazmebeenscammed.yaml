@@ -47,17 +47,12 @@ spec:
             # Erigon RPC endpoint (cluster-internal)
             - name: Erigon__RpcUrl
               value: "http://erigon.ethereum.svc.cluster.local:8545"
-            # Default backend (erigon | clickhouse | adx | blockscout)
+            # Default backend (erigon | clickhouse | blockscout)
             - name: DefaultBackend
               value: "clickhouse"
             # ClickHouse analytics DB
             - name: ClickHouse__ConnectionString
               value: "Host=clickhouse-ethereum-analytics.ethereum.svc.cluster.local;Port=8123;Database=ethereum;Username=etherwurst;Password=etherwurst-ch-2026"
-            # Azure Data Explorer
-            - name: Adx__ClusterUri
-              value: "${AZURE_ADX_CLUSTER_URI}"
-            - name: Adx__Database
-              value: "${AZURE_ADX_DATABASE_NAME}"
           resources:
             requests:
               cpu: 100m

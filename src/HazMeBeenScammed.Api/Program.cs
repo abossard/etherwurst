@@ -13,9 +13,6 @@ builder.AddServiceDefaults();
 var clickhouseConn = builder.Configuration["ClickHouse:ConnectionString"];
 var erigonUrl = builder.Configuration["Erigon:RpcUrl"];
 var blockscoutUrl = builder.Configuration["Blockscout:ApiUrl"];
-var adxClusterUri = builder.Configuration["Adx:ClusterUri"];
-var adxDatabase = builder.Configuration["Adx:Database"] ?? "ethereum";
-
 // Register HTTP clients for configured backends
 if (!string.IsNullOrEmpty(erigonUrl))
 {
@@ -50,7 +47,6 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
     var defaultBackend = !string.IsNullOrEmpty(configuredDefault) ? configuredDefault
         : !string.IsNullOrEmpty(erigonUrl) ? "erigon"
         : !string.IsNullOrEmpty(clickhouseConn) ? "clickhouse"
-        : !string.IsNullOrEmpty(adxClusterUri) ? "adx"
         : !string.IsNullOrEmpty(blockscoutUrl) ? "blockscout"
         : "fake";
 
@@ -81,14 +77,6 @@ builder.Services.AddSingleton<IAdapterRegistry>(sp =>
         registry.Register("clickhouse", new ClickHouseBlockchainAdapter(
             clickhouseConn, erigonAdapter,
             sp.GetRequiredService<ILogger<ClickHouseBlockchainAdapter>>()));
-    }
-
-    // ADX adapter (with Erigon fallback for live-node ops)
-    if (!string.IsNullOrEmpty(adxClusterUri))
-    {
-        registry.Register("adx", new AdxBlockchainAdapter(
-            adxClusterUri, adxDatabase, erigonAdapter,
-            sp.GetRequiredService<ILogger<AdxBlockchainAdapter>>()));
     }
 
     // Fake adapter only when no real backends are configured (integration tests)
@@ -241,18 +229,16 @@ static class DefaultExamples
 {
     public static readonly List<ExampleEntry> All =
     [
-        // Original samples (work with any backend / Erigon)
-        new("Sample Wallet", "0x60d0da6875CA73C6656a38cf76ffB8b3A9AEB57C", "🦊"),
-        new("Sample Tx (first ERC-20)", "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204b93aaa9b6d64c1b0726b9e4b", "📋"),
+        // Wallets — active in ClickHouse block range (2.3M–4.2M, Sep 2016–Aug 2017)
+        new("Ethermine pool", "0xea674fdde714fd979de3edf0f56aa9716b898ec8", "⛏️"),
+        new("Poloniex exchange", "0x32be343b94f860124dc4fee278fdcbd38c102d88", "🏦"),
+        new("Ethermine (alt)", "0x52bc44d5378309ee2abf1539bf71de1b7d7be3b5", "⛏️"),
+        new("DwarfPool", "0x2a65aca4d5fc5b5c859090a6c34d164135398226", "⛏️"),
+        new("ShapeShift", "0x61c808d82a3ac53231750dadc13c777b59310bd9", "🔁"),
 
-        // ClickHouse — recent blocks (~24.5 M)
-        new("Whale (5.5k ETH)", "0xa9ac43f5b5e38155a288d1a01d2cbc4478e14573", "🐋", "clickhouse"),
-        new("High-volume sender", "0x9696f59e4d72e237be84ffd425dcad154bf96976", "🔁", "clickhouse"),
-        new("5546 ETH transfer", "0x9f7f9a6eb59265ee9fe1ef3a8864c6e0aa0a771bbe8eac85230a09cc36c7cfb5", "💸", "clickhouse"),
-
-        // ADX — early blockchain (blocks ~3.7 M, 2017)
-        new("Ethermine pool (2017)", "0x52bc44d5378309ee2abf1539bf71de1b7d7be3b5", "⛏️", "adx"),
-        new("Poloniex (2017)", "0x32be343b94f860124dc4fee278fdcbd38c102d88", "🏦", "adx"),
-        new("327k ETH tx", "0x60362978cf905d475780015593dfc30c3b7ec3cb4a8b692deecddddc7223bf16", "🔥", "adx"),
+        // Transactions — large ETH transfers in the same range
+        new("850k ETH transfer", "0xc8008ba1a157feaec9f18837561cc6e9981e244f684f05d3885d36239d5a6129", "🔥"),
+        new("327k ETH transfer", "0x60362978cf905d475780015593dfc30c3b7ec3cb4a8b692deecddddc7223bf16", "💸"),
+        new("600k ETH transfer", "0x6dd58f2a3aeeef8e1d75fc999453f164dcd9710e64cfef1b3c787fe5cbe66f2a", "💰"),
     ];
 }
