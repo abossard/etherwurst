@@ -32,7 +32,7 @@
                 }
             </select>
             <button class="btn btn-analyze"
-                    @onclick="StartAnalysis"
+                    @onclick="() => StartAnalysis()"
                     disabled="@(IsAnalyzing || string.IsNullOrWhiteSpace(InputValue))">
                 @if (IsAnalyzing)
                 {
@@ -156,8 +156,8 @@
                                     @foreach (var tx in FinalResult.Transactions)
                                     {
                                         <tr class="@(tx.Status == "Failed" ? "table-danger" : "")">
-                                            <td><a href="/@tx.Hash" class="addr-link"><code class="hash-cell">@tx.Hash[..10]…</code></a></td>
-                                            <td><a href="/@tx.From" class="addr-link"><code class="addr-cell">@tx.From[..8]…</code></a></td>
+                                            <td><a href="/@tx.Hash" class="addr-link"><code class="hash-cell">@(tx.Hash?.Length >= 10 ? $"{tx.Hash[..10]}…" : tx.Hash)</code></a></td>
+                                            <td><a href="/@tx.From" class="addr-link"><code class="addr-cell">@(tx.From?.Length >= 8 ? $"{tx.From[..8]}…" : tx.From)</code></a></td>
                                             <td>@RiskBadge(tx.From)</td>
                                             <td>
                                                 @if (tx.ContractName is not null)
@@ -168,9 +168,13 @@
                                                 {
                                                     <a href="/@tx.To" class="addr-link"><span class="badge bg-warning text-dark">⚠️ Unverified Contract</span></a>
                                                 }
+                                                else if (!string.IsNullOrEmpty(tx.To))
+                                                {
+                                                    <a href="/@tx.To" class="addr-link"><code class="addr-cell">@(tx.To.Length >= 8 ? $"{tx.To[..8]}…" : tx.To)</code></a>
+                                                }
                                                 else
                                                 {
-                                                    <a href="/@tx.To" class="addr-link"><code class="addr-cell">@tx.To[..8]…</code></a>
+                                                    <span class="badge bg-info">Contract Creation</span>
                                                 }
                                             </td>
                                             <td>@RiskBadge(tx.To)</td>
@@ -245,6 +249,23 @@
         }
     }
 
+    private bool _autoAnalyzePending;
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrWhiteSpace(Address) && !IsAnalyzing && Events.Count == 0)
+            _autoAnalyzePending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_autoAnalyzePending)
+        {
+            _autoAnalyzePending = false;
+            await StartAnalysis(skipNavigate: true);
+        }
+    }
+
     private void SetSample(string sample, string? backend = null)
     {
         InputValue = sample;
@@ -258,7 +279,7 @@
         if (e.Key == "Enter") await StartAnalysis();
     }
 
-    private async Task StartAnalysis()
+    private async Task StartAnalysis(bool skipNavigate = false)
     {
         if (string.IsNullOrWhiteSpace(InputValue) || IsAnalyzing) return;
 
@@ -270,12 +291,13 @@
         DeepAnalysisMessage = null;
         DeepAnalysisInProgress = false;
         IsAnalyzing = true;
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
 
         try
         {
             var trimmed = InputValue.Trim();
-            Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
+            if (!skipNavigate)
+                Navigation.NavigateTo($"/{Uri.EscapeDataString(trimmed)}", replace: true);
 
             var client = HttpClientFactory.CreateClient("api");
             var backendParam = string.IsNullOrEmpty(SelectedBackend) ? "" : $"&backend={Uri.EscapeDataString(SelectedBackend)}";
@@ -329,7 +351,7 @@
                         }
                         if (evt.Stage == AnalysisStage.Failed)
                             ErrorMessage = evt.Message;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                         await Task.Yield();
                     }
                 }
@@ -342,7 +364,7 @@
         finally
         {
             IsAnalyzing = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
