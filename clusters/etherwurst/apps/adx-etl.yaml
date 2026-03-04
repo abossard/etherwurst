@@ -43,7 +43,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: etl
-              image: ${ACR_LOGIN_SERVER}/adx-etl:be04526 # {"$imagepolicy": "flux-system:adx-etl"}
+              image: ${ACR_LOGIN_SERVER}/adx-etl:fcaee28 # {"$imagepolicy": "flux-system:adx-etl"}
               imagePullPolicy: Always
               env:
                 - name: ERIGON_RPC_URL
