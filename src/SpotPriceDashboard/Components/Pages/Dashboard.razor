@@ -262,8 +262,8 @@
     }
     private int GetRegionCount() => _prices.Select(p => p.Region).Distinct().Count();
 
-    private static Color GetSavingsColor(decimal sav) =>
-        sav >= 80 ? Color.Success : sav >= 50 ? Color.Info : sav >= 20 ? Color.Warning : Color.Error;
+    private static MudBlazor.Color GetSavingsColor(decimal sav) =>
+        sav >= 80 ? MudBlazor.Color.Success : sav >= 50 ? MudBlazor.Color.Info : sav >= 20 ? MudBlazor.Color.Warning : MudBlazor.Color.Error;
 
     public void Dispose()
     {
