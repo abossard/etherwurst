@@ -1,7 +1,29 @@
 ---
 # Azure pricing config for OpenCost
-# CPU/RAM ratios used for allocation; total node cost from Azure Retail API.
-# Storage and network egress values used directly.
+#
+# CPU/RAM ratios used for cost allocation between resources on a node.
+# Total node cost comes from Azure Retail Pricing API (no auth needed).
+# Storage and network egress values are used directly for PV and network costs.
+#
+# KNOWN LIMITATIONS (as of OpenCost v1.119.2):
+#
+# 1. PV STORAGE COSTS = $0
+#    The Azure Rate Card API requires authentication. OpenCost uses the deprecated
+#    go-autorest/adal library which only supports IMDS — it does NOT support
+#    Azure Workload Identity (federated tokens). Result: Rate Card fails, no disk
+#    pricing, PV cost = $0. The PVs have correct CSI volumeHandles with full Azure
+#    resource IDs, so pricing will work once auth is fixed.
+#    Issue: https://github.com/opencost/opencost/issues/3188
+#    Fix PR: https://github.com/opencost/opencost/pull/3265 (open, not merged)
+#    Workaround: create App Registration with client secret (bypasses WI).
+#
+# 2. NETWORK COSTS = $0
+#    Network bytes are tracked but traffic is not classified (zone/region/internet).
+#    OpenCost OSS has no networkCosts DaemonSet (Kubecost-only feature).
+#    Egress rates below are configured but unused without traffic classification.
+#    Cilium Hubble is running and exports metrics to Prometheus, but OpenCost
+#    does not consume them.
+#
 apiVersion: v1
 kind: ConfigMap
 metadata:
