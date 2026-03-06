@@ -1,4 +1,4 @@
-# VPA resources for ethereum namespace workloads (recommendation-only mode)
+# VPA resources for ethereum namespace workloads
 # Review recommendations with: kubectl get vpa -n ethereum -o yaml
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -11,7 +11,15 @@ spec:
     kind: StatefulSet
     name: erigon
   updatePolicy:
-    updateMode: "Off"
+    updateMode: "InPlaceOrRecreate"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: erigon
+        maxAllowed:
+          memory: "32Gi"
+      - containerName: etl-sidecar
+        maxAllowed:
+          memory: "2Gi"
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -24,7 +32,12 @@ spec:
     kind: StatefulSet
     name: lighthouse
   updatePolicy:
-    updateMode: "Off"
+    updateMode: "InPlaceOrRecreate"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: lighthouse
+        maxAllowed:
+          memory: "16Gi"
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
