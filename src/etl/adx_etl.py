@@ -296,26 +296,30 @@ def process_batch(batch_start, batch_end, ingest_client):
     os.makedirs(WORK_DIR, exist_ok=True)
     files_ingested = 0
 
-    for dataset, table in DATASETS.items():
-        # Extract this dataset for the batch
-        cmd = [
-            "cryo", dataset,
-            "-b", f"{batch_start}:{batch_end}",
-            "--rpc", ERIGON_RPC,
-            "-o", WORK_DIR,
-            "--chunk-size", CRYO_CHUNK_SIZE,
-            "--max-concurrent-requests", CRYO_CONCURRENCY,
-            "--requests-per-second", CRYO_RPS,
-            "--no-report",
-            "--hex",
-        ]
-        run(cmd, timeout=3600)
+    # Extract ALL datasets in a single cryo pass (one RPC sweep)
+    dataset_names = list(DATASETS.keys())
+    cmd = [
+        "cryo", *dataset_names,
+        "-b", f"{batch_start}:{batch_end}",
+        "--rpc", ERIGON_RPC,
+        "-o", WORK_DIR,
+        "--chunk-size", CRYO_CHUNK_SIZE,
+        "--max-concurrent-requests", CRYO_CONCURRENCY,
+        "--requests-per-second", CRYO_RPS,
+        "--no-report",
+        "--hex",
+    ]
+    run(cmd, timeout=3600)
 
-        # Find ALL parquet files (cryo may use subdirectories)
-        parquet_files = globmod.glob(f"{WORK_DIR}/**/*.parquet", recursive=True)
+    # Ingest each dataset's parquet files into the corresponding table
+    for dataset in dataset_names:
+        table = DATASETS[dataset]
+        ch_table = CH_TABLES.get(dataset)
+
+        # cryo names files like ethereum__<dataset>__*.parquet
+        parquet_files = globmod.glob(f"{WORK_DIR}/**/*{dataset}*.parquet", recursive=True)
         if not parquet_files:
-            # Fallback: check top level
-            parquet_files = globmod.glob(f"{WORK_DIR}/*.parquet")
+            parquet_files = globmod.glob(f"{WORK_DIR}/*{dataset}*.parquet")
 
         if not parquet_files:
             print(f"    {table}: no files produced")
@@ -332,17 +336,12 @@ def process_batch(batch_start, batch_end, ingest_client):
                 data_format=DataFormat.PARQUET,
             )
 
-        ch_table = CH_TABLES.get(dataset)
         for f in parquet_files:
             if adx_props:
                 ingest_client.ingest_from_file(f, ingestion_properties=adx_props)
             if ch_table:
                 ingest_to_clickhouse(f, ch_table)
             files_ingested += 1
-
-        # Remove ingested files to free disk space before next dataset
-        for f in parquet_files:
-            os.remove(f)
 
         tags = []
         if ADX_ENABLED:
