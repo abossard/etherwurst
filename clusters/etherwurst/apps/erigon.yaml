@@ -30,7 +30,7 @@ spec:
       enabled: false
     persistence:
       enabled: true
-      storageClassName: managed-csi-premium
+      storageClassName: managed-csi-premiumv2
       size: 2Ti
       accessModes:
         - ReadWriteOnce
