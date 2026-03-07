@@ -7,7 +7,6 @@ resources:
   - blockscout.yaml
   - hazmebeenscammed.yaml
   - clickhouse.yaml
-  - ethereum-etl.yaml
   - adx-etl.yaml
   - gateway.yaml
   - cluster-issuer.yaml
