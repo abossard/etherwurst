@@ -223,6 +223,11 @@ resource dcrPrometheus 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
 
 // ─── Networking ───────────────────────────────────────────────────────
 
+// Empty NSG shell — AKS dynamically manages the security rules at runtime
+resource nsgAks 'Microsoft.Network/networkSecurityGroups@2025-05-01' = {
+  name: 'nsg-${dashPrefix}-aks'
+  location: location
+}
 
 resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
   name: vnetName
@@ -234,6 +239,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
         name: snetAksName
         properties: {
           addressPrefix: snetAksPrefix
+          networkSecurityGroup: { id: nsgAks.id }
         }
       }
       {
@@ -293,6 +299,9 @@ resource aks 'Microsoft.ContainerService/managedClusters@2025-10-01' = {
         osSKU: 'AzureLinux'
         vnetSubnetID: snetAksId
         enableAutoScaling: false
+        nodeTaints: [
+          'CriticalAddonsOnly=true:NoSchedule'
+        ]
       }
     ]
     networkProfile: {
