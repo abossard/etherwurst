@@ -113,6 +113,39 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "label": "Namespace",
+        "description": "Select one or more Kubernetes namespaces (kube-* namespaces are excluded)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": {
+          "query": "label_values(kube_pod_info, namespace)",
+          "refId": "StandardVariableQuery"
+        },
+        "definition": "label_values(kube_pod_info, namespace)",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "options": [],
+        "refresh": 2,
+        "regex": "/^(?!kube-).*$/",
+        "skipUrlSync": false,
+        "sort": 1
       }
     ]
   },
@@ -148,7 +181,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "{{pod}}",
           "datasource": {
             "type": "prometheus",
@@ -247,8 +280,8 @@
     },
     {
       "id": 11,
-      "title": "CPU Under Pressure \u2014 Guaranteed Share (stacked)",
-      "description": "Under contention: guaranteed CPU share = (pod_request / total_requests) \u00d7 node_capacity. Stacked view shows each pod's guaranteed cores.",
+      "title": "CPU Under Pressure \u2014 % of Guaranteed Share",
+      "description": "Each pod's percentage of total CPU requests. Under contention, CPU is distributed proportionally to requests.",
       "type": "timeseries",
       "gridPos": {
         "h": 10,
@@ -263,7 +296,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod) / scalar(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}))) * scalar(kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod) / scalar(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\", namespace=~\"$namespace\"})) * 100",
           "legendFormat": "{{pod}}",
           "datasource": {
             "type": "prometheus",
@@ -276,8 +309,9 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "short",
+          "unit": "percent",
           "min": 0,
+          "max": 100,
           "custom": {
             "stacking": {
               "mode": "normal",
@@ -333,13 +367,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", container!=\"\", container!=\"POD\"}[5m])) by (pod)",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", container!=\"\", container!=\"POD\", namespace=~\"$namespace\"}[5m])) by (pod)",
           "legendFormat": "{{pod}} usage",
           "range": true
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "{{pod}} request",
           "range": true
         }
@@ -467,7 +501,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "{{pod}}",
           "datasource": {
             "type": "prometheus",
@@ -567,7 +601,7 @@
     {
       "id": 14,
       "title": "\ud83d\udd34 Danger Zone \u2014 OOM Kill Risk",
-      "description": "Pods using more memory than requested are first to be OOM-killed. Sorted by risk (highest overuse first).",
+      "description": "Pods using more memory than requested (red) are first to be OOM-killed when the node is under memory pressure.",
       "type": "table",
       "gridPos": {
         "h": 12,
@@ -582,21 +616,21 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "",
           "instant": true,
           "format": "table"
         },
         {
           "refId": "B",
-          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"}) by (pod)",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}) by (pod)",
           "legendFormat": "",
           "instant": true,
           "format": "table"
         },
         {
           "refId": "C",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod) > 0",
           "legendFormat": "",
           "instant": true,
           "format": "table"
@@ -702,7 +736,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Overuse"
+              "options": "Over Request"
             },
             "properties": [
               {
@@ -736,48 +770,6 @@
                 }
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of Limit"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percentunit"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "value": null,
-                      "color": "green"
-                    },
-                    {
-                      "value": 0.8,
-                      "color": "orange"
-                    },
-                    {
-                      "value": 0.95,
-                      "color": "red"
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              }
-            ]
           }
         ]
       },
@@ -793,7 +785,7 @@
         },
         "sortBy": [
           {
-            "displayName": "Overuse",
+            "displayName": "Over Request",
             "desc": true
           }
         ]
@@ -829,27 +821,12 @@
         {
           "id": "calculateField",
           "options": {
-            "alias": "Overuse",
+            "alias": "Over Request",
             "mode": "binary",
             "binary": {
               "left": "Value #B",
               "operator": "-",
               "right": "Value #A"
-            },
-            "reduce": {
-              "reducer": "sum"
-            }
-          }
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "% of Limit",
-            "mode": "binary",
-            "binary": {
-              "left": "Value #B",
-              "operator": "/",
-              "right": "Value #C"
             },
             "reduce": {
               "reducer": "sum"
@@ -876,13 +853,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"}) by (pod)",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "{{pod}} actual",
           "range": true
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\", namespace=~\"$namespace\"}) by (pod)",
           "legendFormat": "{{pod}} request",
           "range": true
         }
@@ -1016,13 +993,13 @@
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\", namespace=~\"$namespace\"})",
           "legendFormat": "Total Requested",
           "range": true
         },
         {
           "refId": "C",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", container!=\"\", container!=\"POD\"}[5m]))",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}[5m]))",
           "legendFormat": "Total Used",
           "range": true
         }
@@ -1087,12 +1064,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "rgba(128,128,128,0.4)"
+                  "fixedColor": "rgba(255,255,255,0.6)"
                 }
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 10
+                "value": 0
               },
               {
                 "id": "custom.lineStyle",
@@ -1103,6 +1080,10 @@
                     10
                   ]
                 }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           },
@@ -1121,7 +1102,11 @@
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 15
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           },
@@ -1140,7 +1125,11 @@
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 20
+                "value": 30
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           }
@@ -1184,13 +1173,13 @@
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"})/1024/1024/1024",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\", namespace=~\"$namespace\"})/1024/1024/1024",
           "legendFormat": "Total Requested GiB",
           "range": true
         },
         {
           "refId": "C",
-          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"})/1024/1024/1024",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", namespace=~\"$namespace\", container!=\"\", container!=\"POD\"})/1024/1024/1024",
           "legendFormat": "Total Used GiB",
           "range": true
         }
@@ -1256,12 +1245,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "rgba(128,128,128,0.4)"
+                  "fixedColor": "rgba(255,255,255,0.6)"
                 }
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 10
+                "value": 0
               },
               {
                 "id": "custom.lineStyle",
@@ -1272,6 +1261,10 @@
                     10
                   ]
                 }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           },
@@ -1290,7 +1283,11 @@
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 15
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           },
@@ -1309,7 +1306,11 @@
               },
               {
                 "id": "custom.fillOpacity",
-                "value": 20
+                "value": 30
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
               }
             ]
           }
@@ -1366,13 +1367,13 @@
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", namespace=~\"$namespace\"})",
           "legendFormat": "Requests",
           "range": true
         },
         {
           "refId": "C",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\"})",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\", namespace=~\"$namespace\"})",
           "legendFormat": "Limits",
           "range": true
         }
@@ -1552,13 +1553,13 @@
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\"}) / 1024 / 1024 / 1024",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", namespace=~\"$namespace\"}) / 1024 / 1024 / 1024",
           "legendFormat": "Requests GiB",
           "range": true
         },
         {
           "refId": "C",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\"}) / 1024 / 1024 / 1024",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", namespace=~\"$namespace\"}) / 1024 / 1024 / 1024",
           "legendFormat": "Limits GiB",
           "range": true
         }
