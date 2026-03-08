@@ -132,9 +132,9 @@
     },
     {
       "id": 10,
-      "title": "CPU Reserved by Pod",
-      "description": "Each pod's CPU request (bar) and limit (second color). Shows how much CPU each pod has reserved on the selected node(s).",
-      "type": "bargauge",
+      "title": "CPU Requests by Pod (stacked vs Node Capacity)",
+      "description": "Stacked area shows how pod CPU requests fill up the node. Dashed line = node capacity. Hover to see each pod.",
+      "type": "timeseries",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -149,23 +149,39 @@
         {
           "refId": "A",
           "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod)",
-          "legendFormat": "{{pod}} request",
-          "instant": true
+          "legendFormat": "{{pod}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\", node=~\"$node\"}) by (pod)",
-          "legendFormat": "{{pod}} limit",
-          "instant": true
+          "expr": "scalar(kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"})",
+          "legendFormat": "Node Capacity",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "unit": "short",
           "min": 0,
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "drawStyle": "line",
+            "pointSize": 5
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -180,44 +196,60 @@
             ]
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "namePlacement": "auto",
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color",
-        "minVizWidth": 8,
-        "minVizHeight": 16
-      },
-      "transformations": [
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
               {
-                "field": "Value",
-                "desc": true
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "white"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               }
             ]
           }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
-      ]
+      }
     },
     {
       "id": 11,
-      "title": "CPU Under Pressure \u2014 Guaranteed Share per Pod",
-      "description": "Under contention: guaranteed CPU share = (pod_request / total_requests) \u00d7 node_capacity. Shows the number of cores each pod is guaranteed when all pods compete for CPU.",
-      "type": "bargauge",
+      "title": "CPU Under Pressure \u2014 Guaranteed Share (stacked)",
+      "description": "Under contention: guaranteed CPU share = (pod_request / total_requests) \u00d7 node_capacity. Stacked view shows each pod's guaranteed cores.",
+      "type": "timeseries",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -233,16 +265,29 @@
           "refId": "A",
           "expr": "(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod) / scalar(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}))) * scalar(kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"})",
           "legendFormat": "{{pod}}",
-          "instant": true
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "unit": "short",
           "min": 0,
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "drawStyle": "line",
+            "pointSize": 5
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -260,35 +305,15 @@
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "namePlacement": "auto",
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color",
-        "minVizWidth": 8,
-        "minVizHeight": 16
-      },
-      "transformations": [
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "Value",
-                "desc": true
-              }
-            ]
-          }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
-      ]
+      }
     },
     {
       "id": 12,
@@ -426,9 +451,9 @@
     },
     {
       "id": 13,
-      "title": "Memory Reserved by Pod",
-      "description": "Each pod's memory request (bar) and limit (second color). Units in bytes displayed as GiB.",
-      "type": "bargauge",
+      "title": "Memory Requests by Pod (stacked vs Node Capacity)",
+      "description": "Stacked area shows how pod memory requests fill up the node. Dashed line = node capacity. Hover to see each pod.",
+      "type": "timeseries",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -443,23 +468,39 @@
         {
           "refId": "A",
           "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
-          "legendFormat": "{{pod}} request",
-          "instant": true
+          "legendFormat": "{{pod}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "refId": "B",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\"}) by (pod)",
-          "legendFormat": "{{pod}} limit",
-          "instant": true
+          "expr": "scalar(kube_node_status_allocatable{resource=\"memory\", node=~\"$node\"})",
+          "legendFormat": "Node Capacity",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "unit": "bytes",
           "min": 0,
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "drawStyle": "line",
+            "pointSize": 5
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -474,38 +515,54 @@
             ]
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "namePlacement": "auto",
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color",
-        "minVizWidth": 8,
-        "minVizHeight": 16
-      },
-      "transformations": [
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
               {
-                "field": "Value",
-                "desc": true
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "white"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               }
             ]
           }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
-      ]
+      }
     },
     {
       "id": 14,
