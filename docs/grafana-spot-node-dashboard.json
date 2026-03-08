@@ -44,7 +44,7 @@
   "id": null,
   "uid": null,
   "title": "Spot Node Resource Dashboard",
-  "description": "Kubernetes node resource allocation overview for AKS clusters using Prometheus metrics from Azure Monitor",
+  "description": "Pod-level CPU and memory deep-dive for Kubernetes nodes. Shows resource requests, limits, actual usage, OOM risk, and historical trends.",
   "tags": [
     "kubernetes",
     "aks",
@@ -119,18 +119,28 @@
   "panels": [
     {
       "type": "row",
-      "title": "CPU Allocation per Node",
+      "title": "CPU Deep Dive",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "id": 100,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 200,
       "panels": []
     },
     {
-      "id": 1,
-      "title": "CPU Requests per Node",
-      "description": "Sum of CPU requests by all pod containers on each node",
+      "id": 10,
+      "title": "CPU Reserved by Pod",
+      "description": "Each pod's CPU request (bar) and limit (second color). Shows how much CPU each pod has reserved on the selected node(s).",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -138,51 +148,82 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (node)",
-          "legendFormat": "{{node}}",
-          "instant": true,
-          "format": "table"
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} request",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} limit",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "green"
+            "mode": "continuous-GrYlRd"
           },
           "unit": "short",
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "green" }
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
         "orientation": "horizontal",
         "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
         "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
         "valueMode": "color",
-        "sizing": "auto"
-      }
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Value",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
     },
     {
-      "id": 2,
-      "title": "CPU Limits per Node",
-      "description": "Sum of CPU limits by all pod containers on each node",
+      "id": 11,
+      "title": "CPU Under Pressure \u2014 Guaranteed Share per Pod",
+      "description": "Under contention: guaranteed CPU share = (pod_request / total_requests) \u00d7 node_capacity. Shows the number of cores each pod is guaranteed when all pods compete for CPU.",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -190,51 +231,76 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\", node=~\"$node\"}) by (node)",
-          "legendFormat": "{{node}}",
-          "instant": true,
-          "format": "table"
+          "expr": "(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod) / scalar(sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}))) * scalar(kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"})",
+          "legendFormat": "{{pod}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "orange"
+            "mode": "continuous-GrYlRd"
           },
           "unit": "short",
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "orange" }
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
-          },
-          "min": 0
+          }
         },
         "overrides": []
       },
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
         "orientation": "horizontal",
         "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
         "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
         "valueMode": "color",
-        "sizing": "auto"
-      }
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Value",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
     },
     {
-      "id": 3,
-      "title": "CPU Allocatable per Node",
-      "description": "Total allocatable CPU capacity on each node",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "id": 12,
+      "title": "CPU Actual Usage vs Request",
+      "description": "Actual CPU usage per pod vs its requested amount. Usage above the request line means the pod is bursting beyond its guaranteed allocation.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -242,59 +308,133 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"}",
-          "legendFormat": "{{node}}",
-          "instant": true,
-          "format": "table"
+          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", container!=\"\", container!=\"POD\"}[5m])) by (pod)",
+          "legendFormat": "{{pod}} usage",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} request",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "#808080"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "CPU Cores",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "unit": "short",
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "#808080" }
+              {
+                "value": null,
+                "color": "green"
+              }
             ]
-          },
-          "min": 0
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.* request$/"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
-        "namePlacement": "auto",
-        "valueMode": "color",
-        "sizing": "auto"
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "type": "row",
-      "title": "Memory Allocation per Node",
+      "title": "Memory Deep Dive",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
-      "id": 101,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 201,
       "panels": []
     },
     {
-      "id": 4,
-      "title": "Memory Requests per Node",
-      "description": "Sum of memory requests by all pod containers on each node (GiB)",
+      "id": 13,
+      "title": "Memory Reserved by Pod",
+      "description": "Each pod's memory request (bar) and limit (second color). Units in bytes displayed as GiB.",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -302,52 +442,510 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (node) / 1024 / 1024 / 1024",
-          "legendFormat": "{{node}}",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} request",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} limit",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "unit": "bytes",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color",
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Value",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "\ud83d\udd34 Danger Zone \u2014 OOM Kill Risk",
+      "description": "Pods using more memory than requested are first to be OOM-killed. Sorted by risk (highest overuse first).",
+      "type": "table",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"}) by (pod)",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "",
           "instant": true,
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "green"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
           },
-          "unit": "gibibytes",
-          "decimals": 2,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "green" }
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pod"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Pod"
+              },
+              {
+                "id": "custom.width",
+                "value": 320
+              }
             ]
           },
-          "min": 0
-        },
-        "overrides": []
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Requested"
+              },
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Actual"
+              },
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Limit"
+              },
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Overuse"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "green"
+                    },
+                    {
+                      "value": 0,
+                      "color": "red"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of Limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "green"
+                    },
+                    {
+                      "value": 0.8,
+                      "color": "orange"
+                    },
+                    {
+                      "value": 0.95,
+                      "color": "red"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
-        "namePlacement": "auto",
-        "valueMode": "color",
-        "sizing": "auto"
+        "sortBy": [
+          {
+            "displayName": "Overuse",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "service": true,
+              "node": true
+            },
+            "indexByName": {
+              "pod": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3
+            },
+            "renameByName": {}
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Overuse",
+            "mode": "binary",
+            "binary": {
+              "left": "Value #B",
+              "operator": "-",
+              "right": "Value #A"
+            },
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "% of Limit",
+            "mode": "binary",
+            "binary": {
+              "left": "Value #B",
+              "operator": "/",
+              "right": "Value #C"
+            },
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Memory: Actual vs Requested per Pod",
+      "description": "When actual exceeds request, the pod enters the danger zone for OOM kill. Dashed lines show the requested amount per pod.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"}) by (pod)",
+          "legendFormat": "{{pod}} actual",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"}) by (pod)",
+          "legendFormat": "{{pod}} request",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Memory",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "bytes",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.* request$/"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 1
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
-      "id": 5,
-      "title": "Memory Limits per Node",
-      "description": "Sum of memory limits by all pod containers on each node (GiB)",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "type": "row",
+      "title": "Resource Histograms",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 202,
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "CPU: Total Reserved vs Used",
+      "description": "Node-level CPU overview: allocatable capacity vs total requested vs total actual usage. Gray = headroom, yellow = reserved, green = used.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -355,52 +953,167 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\", node=~\"$node\"}) by (node) / 1024 / 1024 / 1024",
-          "legendFormat": "{{node}}",
-          "instant": true,
-          "format": "table"
+          "expr": "scalar(kube_node_status_allocatable{resource=\"cpu\", node=~\"$node\"})",
+          "legendFormat": "Allocatable",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\", node=~\"$node\"})",
+          "legendFormat": "Total Requested",
+          "range": true
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{node=~\"$node\", container!=\"\", container!=\"POD\"}[5m]))",
+          "legendFormat": "Total Used",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "orange"
+            "mode": "palette-classic"
           },
-          "unit": "gibibytes",
-          "decimals": 2,
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "CPU Cores",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short",
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "orange" }
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Allocatable"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "rgba(128,128,128,0.4)"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 10
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
             ]
           },
-          "min": 0
-        },
-        "overrides": []
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Requested"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Used"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
-        "namePlacement": "auto",
-        "valueMode": "color",
-        "sizing": "auto"
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
-      "id": 6,
-      "title": "Memory Allocatable per Node",
-      "description": "Total allocatable memory capacity on each node (GiB)",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "id": 17,
+      "title": "Memory: Total Reserved vs Used",
+      "description": "Node-level memory overview: allocatable capacity vs total requested vs total actual usage in GiB.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -408,51 +1121,167 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "kube_node_status_allocatable{resource=\"memory\", node=~\"$node\"} / 1024 / 1024 / 1024",
-          "legendFormat": "{{node}}",
-          "instant": true,
-          "format": "table"
+          "expr": "scalar(kube_node_status_allocatable{resource=\"memory\", node=~\"$node\"})/1024/1024/1024",
+          "legendFormat": "Allocatable GiB",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\", node=~\"$node\"})/1024/1024/1024",
+          "legendFormat": "Total Requested GiB",
+          "range": true
+        },
+        {
+          "refId": "C",
+          "expr": "sum(container_memory_working_set_bytes{node=~\"$node\", container!=\"\", container!=\"POD\"})/1024/1024/1024",
+          "legendFormat": "Total Used GiB",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "fixed",
-            "fixedColor": "#808080"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "GiB",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "unit": "gibibytes",
-          "decimals": 2,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "#808080" }
+              {
+                "value": null,
+                "color": "green"
+              }
             ]
           },
-          "min": 0
+          "decimals": 2
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Allocatable GiB"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "rgba(128,128,128,0.4)"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 10
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Requested GiB"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Used GiB"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         },
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16,
-        "namePlacement": "auto",
-        "valueMode": "color",
-        "sizing": "auto"
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "type": "row",
       "title": "Historical CPU",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
       "id": 102,
       "panels": []
     },
@@ -461,7 +1290,12 @@
       "title": "Cluster CPU: Capacity vs Requests vs Limits",
       "description": "Historical view of total cluster CPU allocatable capacity, requests, and limits",
       "type": "timeseries",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -527,33 +1361,84 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "green" },
-              { "value": 80, "color": "red" }
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
           },
           "min": 0
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Capacity" },
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#808080" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.fillOpacity", "value": 0 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#808080"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Requests" },
+            "matcher": {
+              "id": "byName",
+              "options": "Requests"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } },
-              { "id": "custom.fillOpacity", "value": 15 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Limits" },
+            "matcher": {
+              "id": "byName",
+              "options": "Limits"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
-              { "id": "custom.fillOpacity", "value": 10 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 10
+              }
             ]
           }
         ]
@@ -567,7 +1452,9 @@
           "displayMode": "list",
           "placement": "bottom",
           "showValues": "current",
-          "calcs": ["lastNotNull"]
+          "calcs": [
+            "lastNotNull"
+          ]
         }
       }
     },
@@ -575,7 +1462,12 @@
       "type": "row",
       "title": "Historical Memory",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
       "id": 103,
       "panels": []
     },
@@ -584,7 +1476,12 @@
       "title": "Cluster Memory: Capacity vs Requests vs Limits",
       "description": "Historical view of total cluster memory allocatable capacity, requests, and limits (GiB)",
       "type": "timeseries",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 30 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 87
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -651,33 +1548,84 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "green" },
-              { "value": 80, "color": "red" }
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
           },
           "min": 0
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Capacity GiB" },
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity GiB"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#808080" } },
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.fillOpacity", "value": 0 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#808080"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Requests GiB" },
+            "matcher": {
+              "id": "byName",
+              "options": "Requests GiB"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } },
-              { "id": "custom.fillOpacity", "value": 15 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Limits GiB" },
+            "matcher": {
+              "id": "byName",
+              "options": "Limits GiB"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
-              { "id": "custom.fillOpacity", "value": 10 }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 10
+              }
             ]
           }
         ]
@@ -691,7 +1639,9 @@
           "displayMode": "list",
           "placement": "bottom",
           "showValues": "current",
-          "calcs": ["lastNotNull"]
+          "calcs": [
+            "lastNotNull"
+          ]
         }
       }
     },
@@ -699,7 +1649,12 @@
       "type": "row",
       "title": "Node Details",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 97
+      },
       "id": 104,
       "panels": []
     },
@@ -708,7 +1663,12 @@
       "title": "Node Details",
       "description": "Per-node metadata including instance type, capacity type, zone, and allocatable resources",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 41 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 98
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -756,50 +1716,104 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "value": null, "color": "green" }
+              {
+                "value": null,
+                "color": "green"
+              }
             ]
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "node" },
+            "matcher": {
+              "id": "byName",
+              "options": "node"
+            },
             "properties": [
-              { "id": "displayName", "value": "Node" },
-              { "id": "custom.width", "value": 320 }
+              {
+                "id": "displayName",
+                "value": "Node"
+              },
+              {
+                "id": "custom.width",
+                "value": 320
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "label_node_kubernetes_io_instance_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "label_node_kubernetes_io_instance_type"
+            },
             "properties": [
-              { "id": "displayName", "value": "Instance Type" }
+              {
+                "id": "displayName",
+                "value": "Instance Type"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "label_karpenter_sh_capacity_type" },
+            "matcher": {
+              "id": "byName",
+              "options": "label_karpenter_sh_capacity_type"
+            },
             "properties": [
-              { "id": "displayName", "value": "Capacity Type" }
+              {
+                "id": "displayName",
+                "value": "Capacity Type"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "label_topology_kubernetes_io_zone" },
+            "matcher": {
+              "id": "byName",
+              "options": "label_topology_kubernetes_io_zone"
+            },
             "properties": [
-              { "id": "displayName", "value": "Zone" }
+              {
+                "id": "displayName",
+                "value": "Zone"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Value #B" },
+            "matcher": {
+              "id": "byName",
+              "options": "Value #B"
+            },
             "properties": [
-              { "id": "displayName", "value": "CPU Allocatable" },
-              { "id": "unit", "value": "short" },
-              { "id": "decimals", "value": 2 }
+              {
+                "id": "displayName",
+                "value": "CPU Allocatable"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Value #C" },
+            "matcher": {
+              "id": "byName",
+              "options": "Value #C"
+            },
             "properties": [
-              { "id": "displayName", "value": "Memory Allocatable (GiB)" },
-              { "id": "unit", "value": "gibibytes" },
-              { "id": "decimals", "value": 2 }
+              {
+                "id": "displayName",
+                "value": "Memory Allocatable (GiB)"
+              },
+              {
+                "id": "unit",
+                "value": "gibibytes"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
             ]
           }
         ]
@@ -809,9 +1823,14 @@
         "cellHeight": "sm",
         "footer": {
           "show": true,
-          "reducer": ["sum"],
+          "reducer": [
+            "sum"
+          ],
           "countRows": false,
-          "fields": ["Value #B", "Value #C"]
+          "fields": [
+            "Value #B",
+            "Value #C"
+          ]
         },
         "sortBy": [
           {
