@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Azure / IaC
+.azure
+infra/
+infra_tenant/
+clusters/
+
+# Documentation & artifacts
+docs/
+artifacts/
+*.md
+
+# Tests
+tests/
+
+# Other app sources not needed by ETL
+src/HazMeBeenScammed.Api/
+src/HazMeBeenScammed.Web/
+src/HazMeBeenScammed.Core/
+src/HazMeBeenScammed.ServiceDefaults/
+src/HazMeBeenScammed.AppHost/
+src/SpotPriceDashboard/
+
+# Build artifacts
+**/bin/
+**/obj/
+**/node_modules/
+
+# Scripts
+*.sh
+*.slnx
