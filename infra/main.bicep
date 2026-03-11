@@ -223,10 +223,42 @@ resource dcrPrometheus 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
 
 // ─── Networking ───────────────────────────────────────────────────────
 
-// Empty NSG shell — AKS dynamically manages the security rules at runtime
+// Static public IP for the ingress load balancer (nginx gateway).
+// Managed in Bicep so the IP is known at deploy time for NSG rules and DNS.
+resource ingressPip 'Microsoft.Network/publicIPAddresses@2025-05-01' = {
+  name: 'pip-${dashPrefix}-ingress'
+  location: location
+  sku: { name: 'Standard' }
+  zones: ['1', '2', '3']
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+  }
+}
+
+// AKS node subnet NSG — scoped allow for ingress traffic only.
+// AKS manages NIC-level NSG in the MC_ resource group automatically.
+// This subnet-level NSG adds the ingress allow rule using the known static IP.
 resource nsgAks 'Microsoft.Network/networkSecurityGroups@2025-05-01' = {
   name: 'nsg-${dashPrefix}-aks'
   location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowIngressHTTPHTTPS'
+        properties: {
+          priority: 100
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: ingressPip.properties.ipAddress
+          destinationPortRanges: ['80', '443']
+        }
+      }
+    ]
+  }
 }
 
 resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
@@ -915,3 +947,5 @@ output AZURE_ADX_CLUSTER_NAME string = enableAdx ? adxCluster.name : ''
 output AZURE_ADX_DATABASE_NAME string = enableAdx ? adxDatabaseName : ''
 output AZURE_SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_TENANT_ID string = tenant().tenantId
+output AZURE_INGRESS_PUBLIC_IP string = ingressPip.properties.ipAddress
+output AZURE_INGRESS_PUBLIC_IP_RESOURCE_ID string = ingressPip.id

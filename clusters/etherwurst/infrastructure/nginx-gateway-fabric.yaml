@@ -32,6 +32,11 @@ spec:
   values:
     service:
       type: LoadBalancer
+      annotations:
+        # Use the static public IP provisioned by Bicep (pip-{prefix}-ingress in the main resource group).
+        # AKS needs the resource group to find the PIP since it's outside the MC_ group.
+        service.beta.kubernetes.io/azure-load-balancer-resource-group: "rg-hazscam-gwc"
+        service.beta.kubernetes.io/azure-pip-name: "pip-hazscam-r3is7-ingress"
     nginx:
       pod:
         nodeSelector:

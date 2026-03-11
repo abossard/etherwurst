@@ -86,6 +86,7 @@ hooks:
         --from-literal=AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID}" \
         --from-literal=AZURE_TENANT_ID="${AZURE_TENANT_ID}" \
         --from-literal=AZURE_AKS_CLUSTER_NAME="${AZURE_AKS_CLUSTER_NAME}" \
+        --from-literal=AZURE_INGRESS_PUBLIC_IP="${AZURE_INGRESS_PUBLIC_IP}" \
         --from-literal=AZURE_ENV_NAME="${AZURE_ENV_NAME}" \
         --dry-run=client -o yaml | kubectl apply -f -
       echo "  cluster-config ConfigMap created"
