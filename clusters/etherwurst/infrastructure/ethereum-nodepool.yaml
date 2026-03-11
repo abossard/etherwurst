@@ -42,7 +42,10 @@ spec:
           values: ["E"]  # Memory-optimized E-series
         - key: karpenter.azure.com/sku-cpu
           operator: In
-          values: ["16"]
+          values: ["4", "16"]
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: ["germanywestcentral-2", "germanywestcentral-3"]
       startupTaints:
         - key: node.cilium.io/agent-not-ready
           value: "true"
@@ -57,5 +60,5 @@ spec:
     budgets:
       - nodes: "1"
   limits:
-    cpu: "24"
-    memory: "192Gi"
+    cpu: "32"
+    memory: "256Gi"
