@@ -32,6 +32,14 @@ spec:
   values:
     service:
       type: LoadBalancer
+    nginx:
+      pod:
+        nodeSelector:
+          agentpool: system2
+        tolerations:
+          - key: CriticalAddonsOnly
+            operator: Exists
+            effect: NoSchedule
     nginxGateway:
       nodeSelector:
         agentpool: system2
