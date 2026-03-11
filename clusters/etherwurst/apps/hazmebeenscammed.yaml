@@ -44,10 +44,7 @@ spec:
               value: "Production"
             - name: AllowedOrigins
               value: "http://localhost:5174,http://hazmebeenscammed-web.ethereum.svc.cluster.local"
-            # Erigon RPC endpoint (cluster-internal)
-            - name: Erigon__RpcUrl
-              value: "http://erigon.ethereum.svc.cluster.local:8545"
-            # Default backend (erigon | clickhouse | blockscout)
+            # Default backend — ClickHouse only (Erigon RPC disabled while syncing)
             - name: DefaultBackend
               value: "clickhouse"
             # ClickHouse analytics DB
