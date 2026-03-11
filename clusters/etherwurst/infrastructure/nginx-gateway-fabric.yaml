@@ -32,3 +32,10 @@ spec:
   values:
     service:
       type: LoadBalancer
+    nginxGateway:
+      nodeSelector:
+        agentpool: system2
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+          effect: NoSchedule
