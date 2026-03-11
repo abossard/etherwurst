@@ -263,7 +263,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
   }
 }
 
-// Note: Erigon data disk (erigon-data-premiumv2, Premium SSD v2, 10k IOPS)
+// Note: Erigon data disk (erigon-data-premiumv2, Premium SSD v2, 20k IOPS, 500 MBps)
 // lives in the MC_ resource group, managed outside Bicep.
 // Created from snapshot of erigon-data-zrs. See erigon-storage.yaml for K8s PV/PVC.
 
