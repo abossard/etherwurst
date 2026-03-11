@@ -42,7 +42,7 @@ spec:
           values: ["E"]  # Memory-optimized E-series
         - key: karpenter.azure.com/sku-cpu
           operator: In
-          values: ["4", "8", "16"]
+          values: ["16"]
       startupTaints:
         - key: node.cilium.io/agent-not-ready
           value: "true"
