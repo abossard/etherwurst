@@ -35,7 +35,7 @@ spec:
       serviceAccountName: hazmebeenscammed-api-sa
       containers:
         - name: api
-          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:77f9673 # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
+          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-api:ca72783 # {"$imagepolicy": "flux-system:hazmebeenscammed-api"}
           ports:
             - containerPort: 8080
               name: http
@@ -115,7 +115,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-web:77f9673 # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
+          image: ${ACR_LOGIN_SERVER}/hazmebeenscammed-web:ca72783 # {"$imagepolicy": "flux-system:hazmebeenscammed-web"}
           ports:
             - containerPort: 8080
               name: http
