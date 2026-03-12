@@ -33,17 +33,6 @@ spec:
     nginx:
       service:
         type: LoadBalancer
-        # Use JSONPatch to add Azure LB annotations — the chart's NginxProxy CRD
-        # doesn't support annotations directly on the service schema.
-        patches:
-          - type: JSONPatch
-            value:
-              - op: add
-                path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-resource-group
-                value: "rg-hazscam-gwc"
-              - op: add
-                path: /metadata/annotations/service.beta.kubernetes.io~1azure-pip-name
-                value: "pip-hazscam-r3is7-ingress"
       pod:
         nodeSelector:
           agentpool: system2

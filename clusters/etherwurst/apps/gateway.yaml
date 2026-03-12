@@ -7,6 +7,10 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: nginx
+  infrastructure:
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-resource-group: "rg-hazscam-gwc"
+      service.beta.kubernetes.io/azure-pip-name: "pip-hazscam-r3is7-ingress"
   listeners:
     - name: http
       port: 80
