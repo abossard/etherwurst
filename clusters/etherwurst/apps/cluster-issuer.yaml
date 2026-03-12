@@ -9,23 +9,9 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-prod-key
     solvers:
-      - selector:
-          dnsNames:
-            - checkmyethereum.com
-        http01:
+      - http01:
           gatewayHTTPRoute:
             parentRefs:
               - kind: Gateway
                 name: etherwurst-gateway
                 namespace: ethereum
-                sectionName: http
-      - selector:
-          dnsNames:
-            - azurespotty.com
-        http01:
-          gatewayHTTPRoute:
-            parentRefs:
-              - kind: Gateway
-                name: etherwurst-gateway
-                namespace: ethereum
-                sectionName: spotty-http

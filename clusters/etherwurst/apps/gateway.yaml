@@ -27,15 +27,25 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
-    # ── azurespotty.com — self-signed for now, Let's Encrypt can be added later ──
-    - name: spotty-http
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: spotty-gateway
+  namespace: ethereum
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
       port: 80
       protocol: HTTP
       hostname: azurespotty.com
       allowedRoutes:
         namespaces:
           from: All
-    - name: spotty-https
+    - name: https
       port: 443
       protocol: HTTPS
       hostname: azurespotty.com
@@ -44,7 +54,6 @@ spec:
         certificateRefs:
           - kind: Secret
             name: azurespotty-tls
-            namespace: ethereum
       allowedRoutes:
         namespaces:
           from: All
@@ -97,9 +106,9 @@ spec:
   hostnames:
     - azurespotty.com
   parentRefs:
-    - name: etherwurst-gateway
+    - name: spotty-gateway
       namespace: ethereum
-      sectionName: spotty-http
+      sectionName: http
   rules:
     - filters:
         - type: RequestRedirect
@@ -117,9 +126,9 @@ spec:
   hostnames:
     - azurespotty.com
   parentRefs:
-    - name: etherwurst-gateway
+    - name: spotty-gateway
       namespace: ethereum
-      sectionName: spotty-https
+      sectionName: https
   rules:
     - matches:
         - path:
