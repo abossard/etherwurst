@@ -8,7 +8,6 @@ resources:
   - blockscout.yaml
   - hazmebeenscammed.yaml
   - clickhouse.yaml
-  - adx-etl.yaml
   - gateway.yaml
   - cluster-issuer.yaml
   - hubble-ui.yaml
