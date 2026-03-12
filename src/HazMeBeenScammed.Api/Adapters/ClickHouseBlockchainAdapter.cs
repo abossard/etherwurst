@@ -47,8 +47,8 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
             SELECT
                 t.transaction_hash, t.from_address, t.to_address, t.value_f64,
                 t.success, b.timestamp, t.input, t.gas_used
-            FROM default.transactions t
-            JOIN default.blocks b ON t.block_number = b.block_number
+            FROM transactions t
+            JOIN blocks b ON t.block_number = b.block_number
             WHERE t.from_address IN ({inClause}) OR t.to_address IN ({inClause})
             ORDER BY t.block_number DESC
             LIMIT {wallets.Count * 666}
@@ -92,8 +92,8 @@ public sealed class ClickHouseBlockchainAdapter : IBlockchainAnalyticsPort
             SELECT
                 t.transaction_hash, t.from_address, t.to_address, t.value_f64,
                 t.success, b.timestamp, t.input, t.gas_used
-            FROM default.transactions t
-            JOIN default.blocks b ON t.block_number = b.block_number
+            FROM transactions t
+            JOIN blocks b ON t.block_number = b.block_number
             WHERE t.transaction_hash IN ({inClause})
             """;
 
