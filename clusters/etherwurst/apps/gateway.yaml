@@ -3,8 +3,6 @@ kind: Gateway
 metadata:
   name: etherwurst-gateway
   namespace: ethereum
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: nginx
   listeners:
@@ -33,8 +31,6 @@ kind: Gateway
 metadata:
   name: spotty-gateway
   namespace: ethereum
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: nginx
   listeners:
