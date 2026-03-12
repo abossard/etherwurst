@@ -33,11 +33,17 @@ spec:
     nginx:
       service:
         type: LoadBalancer
-        annotations:
-          # Use the static public IP provisioned by Bicep (pip-{prefix}-ingress in the main resource group).
-          # AKS needs the resource group to find the PIP since it's outside the MC_ group.
-          service.beta.kubernetes.io/azure-load-balancer-resource-group: "rg-hazscam-gwc"
-          service.beta.kubernetes.io/azure-pip-name: "pip-hazscam-r3is7-ingress"
+        # Use JSONPatch to add Azure LB annotations — the chart's NginxProxy CRD
+        # doesn't support annotations directly on the service schema.
+        patches:
+          - type: JSONPatch
+            value:
+              - op: add
+                path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-resource-group
+                value: "rg-hazscam-gwc"
+              - op: add
+                path: /metadata/annotations/service.beta.kubernetes.io~1azure-pip-name
+                value: "pip-hazscam-r3is7-ingress"
       pod:
         nodeSelector:
           agentpool: system2
