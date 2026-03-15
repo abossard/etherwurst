@@ -21,14 +21,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${SCRIPT_DIR}/src"
 MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/hazmebeenscammed.yaml"
-ETL_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/adx-etl.yaml"
+ERIGON_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/erigon.yaml"
 SPOT_MANIFEST="${SCRIPT_DIR}/clusters/etherwurst/apps/spot-dashboard.yaml"
 
 ACR_NAME="${ACR_NAME:-$(cd "$SCRIPT_DIR" && azd env get-value AZURE_CONTAINER_REGISTRY_NAME 2>/dev/null || echo 'acrhazscamr3is7')}"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 API_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-api"
 WEB_IMAGE="${ACR_LOGIN_SERVER}/hazmebeenscammed-web"
-ETL_IMAGE="${ACR_LOGIN_SERVER}/adx-etl"
+ETL_IMAGE="${ACR_LOGIN_SERVER}/adx-etl"  # deployed as sidecar in erigon, not standalone
 SPOT_IMAGE="${ACR_LOGIN_SERVER}/spot-dashboard"
 NAMESPACE="ethereum"
 IMAGE_TAG="${IMAGE_TAG:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)}"
@@ -149,18 +149,18 @@ deploy() {
      s|(hazmebeenscammed-web:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$MANIFEST"
   rm -f "${MANIFEST}.bak"
   sed -i.bak -E \
-    "s|(adx-etl:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$ETL_MANIFEST"
-  rm -f "${ETL_MANIFEST}.bak"
+    "s|(adx-etl:)[^ ]+|\1${IMAGE_TAG}|g" "$ERIGON_MANIFEST"
+  rm -f "${ERIGON_MANIFEST}.bak"
   sed -i.bak -E \
     "s|(spot-dashboard:)[^ ]+( #)|\1${IMAGE_TAG}\2|g" "$SPOT_MANIFEST"
   rm -f "${SPOT_MANIFEST}.bak"
 
-  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST" "$ETL_MANIFEST" "$SPOT_MANIFEST"; then
+  if git -C "$SCRIPT_DIR" diff --quiet "$MANIFEST" "$ERIGON_MANIFEST" "$SPOT_MANIFEST"; then
     ok "Manifests already at ${IMAGE_TAG}"
     return
   fi
 
-  git -C "$SCRIPT_DIR" add "$MANIFEST" "$ETL_MANIFEST" "$SPOT_MANIFEST"
+  git -C "$SCRIPT_DIR" add "$MANIFEST" "$ERIGON_MANIFEST" "$SPOT_MANIFEST"
   git -C "$SCRIPT_DIR" commit -m "deploy: update images to ${IMAGE_TAG}
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
@@ -177,7 +177,7 @@ show_status() {
   for d in hazmebeenscammed-api hazmebeenscammed-web; do
     echo "  ${d}: $(kubectl get deploy "$d" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
   done
-  echo "  adx-etl: $(kubectl get cronjob adx-etl-sync -n "$NAMESPACE" -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}' 2>/dev/null || echo 'not found')"
+  echo "  adx-etl (sidecar): $(kubectl --context=aks-hazscam-r3is7 get pod erigon-0 -n "$NAMESPACE" -o jsonpath='{.status.containerStatuses[?(@.name=="etl-sidecar")].ready}' 2>/dev/null || echo 'not found')"
   echo ""
   log "SpotPriceDashboard status:"
   kubectl get pods -n spot-dashboard 2>/dev/null | sed 's/^/  /'

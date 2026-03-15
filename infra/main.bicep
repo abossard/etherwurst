@@ -295,9 +295,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
   }
 }
 
-// Note: Erigon data disk (erigon-data-premiumv2, Premium SSD v2, 20k IOPS, 500 MBps)
-// lives in the MC_ resource group, managed outside Bicep.
-// Created from snapshot of erigon-data-zrs. See erigon-storage.yaml for K8s PV/PVC.
+// Note: Erigon data disk is dynamically provisioned via StorageClass (managed-csi-premiumv2)
+// in Kubernetes. Old static disks (erigon-data-premiumv2) and snapshots (erigon-data-zrs)
+// have been cleaned up. See erigon-storage.yaml for K8s PV/PVC.
 
 // ─── Container Registry ──────────────────────────────────────────────
 
@@ -450,7 +450,7 @@ resource appFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
   }
 }
 
-// ADX ETL → federated credential (CronJob in ethereum namespace)
+// ADX ETL → federated credential (sidecar in Erigon pod, ethereum namespace)
 resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = if (enableAdx) {
   name: 'adx-etl-workload-identity'
   parent: appIdentity
