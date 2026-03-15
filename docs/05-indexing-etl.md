@@ -29,7 +29,7 @@ The raw Ethereum RPC API is powerful but **not optimized for analytics queries**
 
 ### Tier 1: cryo (Paradigm) — Bulk Data Export
 
-**The fastest way to get historical blockchain data into Parquet files** for Databricks/Spark analysis.
+**The fastest way to get historical blockchain data into Parquet files** for ClickHouse analysis.
 
 - **Repo**: https://github.com/paradigmxyz/cryo
 - **Language**: Rust (also available as Python package)
@@ -71,7 +71,7 @@ cryo blocks txs logs traces -b 0:latest -o /data/ethereum-parquet/
 | `contracts` | Contract creation events |
 | `native_transfers` | ETH transfers (including internal) |
 
-**Output goes directly to Parquet** → upload to Azure Blob Storage → query in Databricks.
+**Output goes directly to Parquet** → ingest into ClickHouse via its HTTP API.
 
 ### Tier 2: ethereum-etl — Streaming Pipeline
 
@@ -154,14 +154,18 @@ ponder.on("UniswapV3Pool:Swap", async ({ event, context }) => {
 ```
 Erigon (Archive Node)
     │
-    ├── cryo (bulk) ──────→ Parquet files ──→ Azure Blob Storage ──→ Databricks
-    │                                                                   ↑
-    ├── ethereum-etl (stream) ──→ PostgreSQL (real-time) ──────────────┘
+    ├── cryo (bulk) ──────→ Parquet files ──→ ClickHouse (analytics) ⭐ production pipeline
+    │
+    ├── ethereum-etl (stream) ──→ PostgreSQL (real-time)
     │
     ├── Blockscout indexer ──→ PostgreSQL (explorer API)
     │
     └── Ponder (custom) ──→ PostgreSQL (app-specific GraphQL)
 ```
+
+> **Production choice:** The project uses **cryo + ClickHouse** as the primary analytics pipeline.
+> ClickHouse is self-hosted on AKS via the Altinity operator and ingests Parquet files directly
+> through its HTTP API. Tables: `blocks`, `transactions`, `logs`, `contracts`.
 
 ---
 
@@ -176,4 +180,4 @@ Erigon (Archive Node)
 | Token Transfers | ~50 GB |
 | **Total** | **~1 TB+** |
 
-This is why Databricks (with Delta Lake on Azure Blob Storage) is ideal — cheap, scalable storage with fast query performance.
+This is why ClickHouse (self-hosted on AKS via Altinity operator) is ideal — it ingests Parquet directly, offers columnar compression, and provides fast analytical query performance at low cost.

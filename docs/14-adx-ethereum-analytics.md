@@ -1,3 +1,15 @@
+> [!WARNING]
+> **⚠️ DEPRECATED — Historical Reference Only**
+>
+> This document is **historical/reference only**. The project has chosen **ClickHouse** as its
+> analytics platform (see [doc 12](./12-blockchain-analytics-database.md)). ADX infrastructure is
+> disabled by default (`enableAdx: false` in `main.bicep`). The ADX adapter exists in the API
+> codebase but is not deployed or configured in production.
+>
+> For the active analytics setup, see:
+> - [`docs/12-blockchain-analytics-database.md`](./12-blockchain-analytics-database.md)
+> - [`docs/clickhouse-quickstart.md`](./clickhouse-quickstart.md)
+
 # Azure Data Explorer (ADX) for Ethereum Blockchain Analytics
 
 ## The Case for ADX

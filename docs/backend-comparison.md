@@ -1,10 +1,24 @@
 # Backend Comparison — Erigon vs ClickHouse vs ADX
 
+## Current Production Configuration
+
+The API supports multiple backends via `AdapterRegistry`. The active production setup is:
+
+| Backend | Status | Role |
+|---|---|---|
+| **ClickHouse** | ✅ **Default** (`DefaultBackend=clickhouse`) | Primary analytics backend — fast aggregation queries |
+| **Erigon** | ✅ Active | Live-node fallback for real-time/full-chain lookups |
+| **Blockscout** | ✅ Available | Registered when configured; used for block explorer data |
+| **ADX** | ❌ Not deployed | Adapter exists in code but `enableAdx: false` in infra; no cluster provisioned |
+| **Fake** | — | Test-only fallback when no real backends are configured |
+
+## Historical Test Results
+
 > Test run: 2026-03-04. Each backend was tested against all 8 example addresses/transactions.
+>
+> **Note:** ADX results are from a historical test when an ADX cluster was temporarily provisioned. The ADX *query backend* is no longer deployed, but the ETL pipeline runs as a sidecar in the Erigon pod, feeding data to ClickHouse.
 
-## Results
-
-| Example | Input | Erigon | ClickHouse | ADX |
+| Example | Input | Erigon | ClickHouse | ADX ³ |
 |---|---|---|---|---|
 | 🦊 Sample Wallet | `0x60d0da…B57C` | ✅ 12 txs, risk 69, likelyScam | ✅ 0 txs¹, risk 0, clean | ✅ 0 txs¹, risk 0, clean |
 | 📋 Sample Tx (1st ERC-20) | `0x5c504e…9e4b` | ✅ 0 txs², risk 0, clean | ✅ 0 txs², risk 0, clean | ✅ 0 txs², risk 0, clean |
@@ -21,19 +35,19 @@
 - ⏱️ = timed out after 120s (too many sequential RPC calls)
 - ¹ Address/tx not in this backend's block range — returns 0 txs (expected)
 - ² Transaction hash analysis returns the single tx detail, not wallet history
+- ³ Historical test — ADX query backend is no longer deployed (ETL sidecar feeds ClickHouse instead)
 
 ## Coverage Summary
 
-| Backend | Blocks Covered | Wallets Returning Data | Tx Hashes Returning Data | Timeouts |
-|---|---|---|---|---|
-| **Erigon** | Full chain (live node) | 1/5 (slow for high-tx wallets) | 3/3 | 4/8 |
-| **ClickHouse** | ~24,561,444–24,562,444 (recent) | 2/5 | 3/3 | 0/8 |
-| **ADX** | ~3,720,000–3,791,999 (2017 era) | 2/5 | 3/3 | 0/8 |
+| Backend | Status | Blocks Covered | Wallets Returning Data | Tx Hashes Returning Data | Timeouts |
+|---|---|---|---|---|---|
+| **ClickHouse** | Production default | ~24,561,444–24,562,444 (recent) | 2/5 | 3/3 | 0/8 |
+| **Erigon** | Active fallback | Full chain (live node) | 1/5 (slow for high-tx wallets) | 3/3 | 4/8 |
+| **ADX** | Not deployed ³ | ~3,720,000–3,791,999 (2017 era) | 2/5 | 3/3 | 0/8 |
 
 ## Key Takeaways
 
-1. **ClickHouse is the fastest backend** — handles high-tx wallets (330–519 txs) instantly, while Erigon times out on the same addresses due to sequential RPC calls.
-2. **Each backend covers different blocks** — ClickHouse has recent blocks, ADX has 2017-era blocks. Zero wallet overlap between them.
-3. **Erigon has full chain coverage** but is impractical for wallets with many transactions (sequential `ots_searchTransactionsBefore` + `eth_getTransactionReceipt` per tx).
-4. **Transaction hash lookups work across all backends** — single-tx lookups are fast regardless of backend.
-5. **Default should be ClickHouse** for the best user experience (now configured).
+1. **ClickHouse is the production default** — handles high-tx wallets (330–519 txs) instantly, while Erigon times out on the same addresses due to sequential RPC calls.
+2. **Erigon has full chain coverage** but is impractical for wallets with many transactions (sequential `ots_searchTransactionsBefore` + `eth_getTransactionReceipt` per tx). It serves as a live-node fallback.
+3. **Transaction hash lookups work across all backends** — single-tx lookups are fast regardless of backend.
+4. **ADX was evaluated historically** and showed comparable query speed to ClickHouse, but covered different (2017-era) blocks. The ADX query backend is no longer deployed due to cost and operational complexity (`enableAdx: false` in infrastructure). The ETL pipeline now runs as a sidecar container (`etl-sidecar`) in the Erigon pod, feeding data exclusively to ClickHouse.

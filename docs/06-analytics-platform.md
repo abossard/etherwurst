@@ -1,5 +1,9 @@
 # 05 — Analytics Platform: Querying Blockchain Data at Scale
 
+> [!NOTE]
+> **Decision: ClickHouse was selected** as the analytics platform for this project. See the
+> [Decision](#decision-clickhouse) section below for rationale and deployed configuration.
+
 ## The Problem
 
 Once you've exported blockchain data (via cryo, ethereum-etl, or Blockscout), you need a way to:
@@ -24,9 +28,12 @@ Once you've exported blockchain data (via cryo, ethereum-etl, or Blockscout), yo
 
 ---
 
-## ⭐ Recommended: Azure Databricks
+## ⭐ Originally Recommended: Azure Databricks
 
-For this project, **Databricks is the clear winner** because:
+> **Note:** Databricks was the initial recommendation during evaluation. After hands-on testing,
+> **ClickHouse was ultimately selected** — see [Decision](#decision-clickhouse) below.
+
+The original case for Databricks:
 
 1. **Storage is dirt cheap** — Delta Lake on Azure Blob Storage costs ~$0.02/GB/month. 1TB of Parquet = ~$20/month
 2. **Compute scales to zero** — Only pay when running queries or jobs
@@ -258,10 +265,49 @@ results = cursor.fetchall()
 
 ## Cost Comparison (Monthly, ~1TB blockchain data)
 
-| Solution | Storage | Compute | Total |
-|----------|---------|---------|-------|
-| **Databricks** (serverless SQL) | ~$20 (Blob) | ~$100-300 (on-demand) | **~$150-350** |
-| **ClickHouse** (on AKS) | ~$200 (Premium SSD 2TB) | ~$400 (D8ds_v5) | **~$600** |
-| **PostgreSQL** (on AKS) | ~$200 (Premium SSD 2TB) | ~$400 (D8ds_v5) | **~$600** |
+| Solution | Storage | Compute | Platform Fee | Total |
+|----------|---------|---------|--------------|-------|
+| **ClickHouse** (on AKS) ✅ | ~$60 (Premium SSD 500Gi) | ~$200 (AKS node) | $0 | **~$260** |
+| **Databricks** (serverless SQL) | ~$20 (Blob) | ~$100-300 (on-demand) | DBU markup | **~$150-350+** |
+| **PostgreSQL** (on AKS) | ~$200 (Premium SSD 2TB) | ~$400 (D8ds_v5) | $0 | **~$600** |
 
-Databricks wins on cost because storage is on cheap Blob and compute scales to zero.
+ClickHouse on AKS is significantly cheaper than Databricks when you factor in the $0 platform fee
+(just AKS node cost). Databricks has cheaper storage but adds DBU compute markup and vendor lock-in.
+
+---
+
+## Decision: ClickHouse
+
+After evaluating all options, **ClickHouse was selected** as the analytics platform for this project.
+
+### Rationale
+
+1. **Sub-second query performance** — Aggregations across billions of rows return in under a second, ideal for interactive dashboards and API-backed queries
+2. **Excellent compression** — Columnar storage with LZ4/ZSTD achieves 5-10× compression on blockchain data, keeping storage costs low
+3. **Native Parquet ingestion** — Direct `INSERT INTO ... SELECT * FROM file('*.parquet')` support makes the ETL pipeline trivially simple
+4. **Strong blockchain analytics ecosystem** — Projects like [Xatu](https://github.com/ethpandaops/xatu) (ethpandaops), Dune Analytics, and Goldsky all use ClickHouse for blockchain data
+5. **No cloud vendor lock-in** — Self-hosted on AKS via the Altinity Operator; can move to any Kubernetes cluster
+
+### Deployed Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| **Operator** | Altinity Kubernetes Operator for ClickHouse |
+| **Shards** | 1 |
+| **Replicas** | 1 |
+| **Storage** | 500Gi Premium SSD (`premium-ssd` StorageClass) |
+| **Hosting** | Self-hosted on AKS (not managed ClickHouse Cloud) |
+
+### ETL Pipeline
+
+```
+Erigon RPC → cryo → Parquet files → ClickHouse (INSERT from Parquet)
+```
+
+1. **Erigon** provides the full-archive Ethereum node RPC
+2. **cryo** extracts blocks, transactions, logs, and traces as Parquet files
+3. **ClickHouse** ingests Parquet directly with native `file()` / `s3()` table functions
+
+For detailed setup instructions, see:
+- [`docs/12-blockchain-analytics-database.md`](./12-blockchain-analytics-database.md) — full ClickHouse schema and deployment
+- [`docs/clickhouse-quickstart.md`](./clickhouse-quickstart.md) — quick start guide
