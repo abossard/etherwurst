@@ -37,16 +37,16 @@
 │                         Analytics Layer                                       │
 │                                                                               │
 │  ┌─────────────────────────────────────────┐  ┌───────────────────────────┐  │
-│  │         Azure Databricks                 │  │  Blockscout PostgreSQL    │  │
-│  │                                          │  │                           │  │
-│  │  Delta Lake tables:                      │  │  Etherscan-compatible     │  │
-│  │  ├── ethereum.blocks                     │  │  REST API for AI agents   │  │
-│  │  ├── ethereum.transactions               │  │                           │  │
-│  │  ├── ethereum.logs                       │  └───────────────────────────┘  │
-│  │  ├── ethereum.traces                     │                                 │
-│  │  └── ethereum.token_transfers            │                                 │
+│  │  ClickHouse (self-hosted on AKS)         │  │  Blockscout PostgreSQL    │  │
+│  │  Altinity Operator, 1 shard / 1 replica  │  │                           │  │
+│  │  Premium SSD 500Gi                       │  │  Etherscan-compatible     │  │
+│  │                                          │  │  REST API for AI agents   │  │
+│  │  Tables:                                 │  │                           │  │
+│  │  ├── blocks                              │  └───────────────────────────┘  │
+│  │  ├── transactions                        │                                 │
+│  │  ├── logs                                │                                 │
+│  │  └── contracts                           │                                 │
 │  │                                          │                                 │
-│  │  + ML/AI runtime (MLflow, LLMs)          │                                 │
 │  └─────────────────────────────────────────┘                                 │
 └──────────────────────────────────────────────────────────┬────────────────────┘
                                                            │
@@ -57,7 +57,7 @@
 │  LLM (Azure OpenAI / Claude) with function-calling tools:                    │
 │  ├── blockscout_api()    → Address lookups, tx history, contract ABIs        │
 │  ├── erigon_rpc()        → trace_transaction, debug_traceTransaction         │
-│  ├── databricks_sql()    → Complex analytics queries across all history      │
+│  ├── clickhouse_sql()    → Complex analytics queries across all history      │
 │  ├── decode_contract()   → ABI decoding of contract interactions             │
 │  └── build_flow_graph()  → Directed graph of fund flows                      │
 │                                                                               │
@@ -95,23 +95,21 @@
 **Milestone**: Can call `?module=account&action=txlist&address=0x...` and get results
 
 ### Phase 3: Bulk Data Export & Analytics
-**Goal**: All historical data queryable in Databricks
+**Goal**: All historical data queryable in ClickHouse
 
+- [ ] Deploy ClickHouse on AKS via Altinity operator (1 shard, 1 replica, 500Gi premium SSD)
 - [ ] Deploy cryo as a CronJob on AKS
-- [ ] Export full history to Parquet (blocks, txs, logs, traces)
-- [ ] Create Azure Blob Storage (ADLS Gen2)
-- [ ] Upload Parquet to Blob Storage
-- [ ] Create Databricks workspace
-- [ ] Create Delta Lake tables from Parquet
+- [ ] Export full history to Parquet (blocks, txs, logs, contracts)
+- [ ] Load Parquet into ClickHouse tables (blocks, transactions, logs, contracts)
 - [ ] Set up incremental update pipeline (daily cryo + ethereum-etl streaming)
-- [ ] Optimize tables (Z-ORDER on key columns)
+- [ ] Optimize tables (ORDER BY on key columns, partition by block ranges)
 
 **Milestone**: Can run complex SQL queries across all Ethereum history in seconds
 
 ### Phase 4: AI Investigation Agent
 **Goal**: Give it addresses + scenario → get investigation report
 
-- [ ] Define tool functions (Blockscout API, Erigon RPC, Databricks SQL)
+- [ ] Define tool functions (Blockscout API, Erigon RPC, ClickHouse SQL)
 - [ ] Build agent scaffold with LLM function-calling
 - [ ] Implement investigation workflow (recon → analysis → traces → report)
 - [ ] Add fund-flow graph generation (Mermaid diagrams)
@@ -144,7 +142,7 @@
 | Helm Charts | **ethpandaops** | Official EF DevOps, all clients |
 | Bulk ETL | **cryo** | Fastest, Parquet output, by Paradigm |
 | Stream ETL | **ethereum-etl** | Mature, PostgreSQL/BigQuery support |
-| Analytics | **Azure Databricks** | Cheap storage, auto-scaling, ML built-in |
+| Analytics | **ClickHouse** (self-hosted on AKS) | Fast columnar queries, Altinity operator, low cost |
 | AI Agent | **LLM + function-calling** | Flexible, can query all layers |
 | Monitoring | **Forta** | Decentralized, pre-built detection bots |
 | K8s Storage | **Ultra SSD** (hot) + **Premium SSD** (cold) | Cost-optimized for Erigon's split storage |

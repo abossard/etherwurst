@@ -1,37 +1,47 @@
-# ADX Ethereum ETL
+# ClickHouse Ethereum ETL
 
-Extracts Ethereum blockchain data from an Erigon archive node and loads it into Azure Data Explorer (ADX).
+Extracts Ethereum blockchain data from an Erigon archive node and loads it into ClickHouse via HTTP ingestion. Runs as a **sidecar container** inside the Erigon pod for zero-latency localhost RPC access.
 
 ## Architecture
 
 ```
-Erigon (RPC:8545)
-    │ batch JSON-RPC (32 concurrent)
-    ▼
-cryo (Rust binary)  ─── 500-1,500 blocks/sec
-    │ Parquet + Snappy compression
-    ▼
-Azure Blob Storage (ethereum-etl container)
-    │ az storage blob upload-batch
-    ▼
-ADX Queued Ingestion (from blob URLs)
-    │ Kusto Python SDK
-    ▼
-Azure Data Explorer (7 tables)
+┌─── Erigon Pod ──────────────────────────────┐
+│                                              │
+│  Erigon (RPC on localhost:8545)              │
+│      │ batch JSON-RPC (64 concurrent, no     │
+│      │ RPS limit) via localhost loopback      │
+│      ▼                                       │
+│  etl-sidecar container                       │
+│      │ cryo extraction → Parquet files       │
+│      │ (50K-block batches, /tmp/cryo-extract)│
+│      ▼                                       │
+│  HTTP POST (INSERT INTO … FORMAT Parquet)    │
+│                                              │
+└──────────────────────────────────────────────┘
+                    │
+                    ▼
+          ClickHouse (4 tables)
 ```
+
+The sidecar runs in `SIDECAR_MODE=true` — a continuous loop with 60s sleep between runs. cryo extracts blocks, transactions, and logs as Parquet files, which are posted directly to the ClickHouse HTTP interface. Progress is tracked in the `etl_progress` table for incremental runs.
+
+**Key advantage**: Because the ETL runs in the same pod as Erigon, RPC calls go over `localhost` with zero network latency, enabling maximum extraction throughput (64 concurrency, unlimited RPS).
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `Dockerfile` | Multi-stage build: Rust (cryo) + Python (orchestrator + Azure CLI) |
-| `adx_etl.py` | Python orchestrator — cryo extraction → blob upload → ADX ingestion |
-| `adx-schema.kql` | ADX table definitions, ingestion mappings, policies |
-| `requirements.txt` | Python dependencies (Kusto SDK, pyarrow, azure-identity) |
+| `Dockerfile` | Multi-stage build: Rust (cryo from source) + Python runtime |
+| `adx_etl.py` | Python orchestrator — cryo extraction → ClickHouse HTTP ingestion |
+| `clickhouse-schema.sql` | ClickHouse table definitions (ReplacingMergeTree) |
+| `adx-schema.kql` | ADX table definitions (historical, not used in production) |
+| `requirements.txt` | Python dependencies (pyarrow, requests, azure-identity) |
+
+> **Note:** `adx_etl.py` retains ADX support (Kusto SDK ingestion via Azure Blob Storage) but ADX is disabled in production (`ADX_CLUSTER_URI=""`). Infrastructure has `enableAdx: false`.
 
 ## Docker Image
 
-The image is built by `build-deploy.sh` and pushed to ACR alongside the app images:
+The image is built by `build-deploy.sh` and pushed to ACR as `adx-etl` (historical name):
 
 ```bash
 # Build all images (API + Web + ETL) in parallel
@@ -47,56 +57,76 @@ docker build -f src/etl/Dockerfile -t adx-etl:local .
 docker run --rm --entrypoint cryo adx-etl:local --version
 ```
 
-Build takes ~4 min. Rust builder compiles cryo from source; Python stage installs Kusto SDK + Azure CLI.
+Build takes ~4 min. The Rust stage compiles cryo from source; the Python stage installs the orchestrator dependencies.
 
-## Deployment (Flux GitOps)
+## Deployment
 
-The CronJob is deployed via Flux from `clusters/etherwurst/apps/adx-etl.yaml`:
+The ETL runs as a **sidecar container** (`etl-sidecar`) inside the Erigon pod, defined in [`clusters/etherwurst/apps/erigon.yaml`](../../clusters/etherwurst/apps/erigon.yaml) under `extraContainers`.
 
-- **Image**: `${ACR_LOGIN_SERVER}/adx-etl:latest` (substituted by Flux from cluster-config)
-- **Schedule**: `0 2 * * *` (daily at 02:00 UTC)
-- **Auth**: Azure Workload Identity via `adx-etl-sa` ServiceAccount
-- **Namespace**: `ethereum`
+- **Image**: `${ACR_LOGIN_SERVER}/adx-etl:latest`
+- **Mode**: `SIDECAR_MODE=true` — continuous loop (not a CronJob), sleeps 60s between runs
+- **RPC**: `http://localhost:8545` (pod-local Erigon, zero network hop)
+- **Target**: ClickHouse only (`ADX_CLUSTER_URI` is empty/disabled)
+- **Datasets**: `blocks,transactions,logs` (contracts excluded)
+- **Scale**: 50K blocks/batch, 64 concurrency, unlimited RPS, 25M block lookback
+- **Temp storage**: 10Gi `emptyDir` volume mounted at `/tmp/cryo-extract`
+- **Identity**: `adx-etl-sa` ServiceAccount with Azure Workload Identity
+- **Resources**: requests 500m CPU / 512Mi RAM, limits 4 CPU / 4Gi RAM
 
 Image tags are updated by `build-deploy.sh --deploy` which commits the new tag to git, triggering Flux reconciliation.
 
 ## Configuration (Environment Variables)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ERIGON_RPC_URL` | `http://erigon:8545` | Erigon JSON-RPC endpoint |
-| `ADX_CLUSTER_URI` | (required) | ADX cluster URI |
-| `ADX_DATABASE` | `ethereum` | ADX database name |
-| `STORAGE_ACCOUNT_NAME` | (required) | Azure Storage account for staging |
-| `STORAGE_CONTAINER` | `ethereum-etl` | Blob container name |
-| `AZURE_RESOURCE_GROUP` | (required) | Resource group (for ADX start/stop) |
-| `MAX_BLOCKS` | `100000` | Max blocks per run |
-| `CRYO_CONCURRENCY` | `32` | cryo parallel requests |
-| `CRYO_CHUNK_SIZE` | `10000` | Blocks per cryo output file |
-| `CRYO_RPS` | `100` | cryo requests per second |
-| `STOP_ADX_AFTER` | `false` | Stop ADX cluster after ETL completes |
-| `FIRST_RUN_LOOKBACK` | `10000` | Blocks to backfill on first run |
+### Required
 
-## ADX Schema
+| Variable | Description | Production Value |
+|----------|-------------|------------------|
+| `ERIGON_RPC_URL` | Erigon JSON-RPC endpoint | `http://localhost:8545` |
+| `CH_URL` | ClickHouse HTTP endpoint | `http://clickhouse-ethereum-analytics:8123/?database=ethereum` |
+| `CH_USER` | ClickHouse username | `etherwurst` |
+| `CH_PASSWORD` | ClickHouse password | *(set in manifest)* |
 
-Apply schema to the ADX cluster:
+### Sidecar / Tuning
+
+| Variable | Production Value | Description |
+|----------|------------------|-------------|
+| `SIDECAR_MODE` | `true` | Run in continuous loop instead of one-shot |
+| `LOOP_SLEEP_SECS` | `60` | Seconds to sleep between sidecar loop iterations |
+| `MAX_BLOCKS` | `25000000` | Max blocks per run |
+| `BATCH_SIZE` | `50000` | Blocks per batch |
+| `CRYO_CONCURRENCY` | `64` | cryo parallel requests |
+| `CRYO_CHUNK_SIZE` | `50000` | Blocks per cryo output file |
+| `CRYO_RPS` | `0` | cryo requests per second (`0` = unlimited) |
+| `FIRST_RUN_LOOKBACK` | `25000000` | Blocks to backfill on first run |
+| `WORKER_ID` | `sidecar` | Identifier for this ETL instance |
+| `EXTRACT_DATASETS` | `blocks,transactions,logs` | Datasets to extract (comma-separated) |
+| `ADX_CLUSTER_URI` | *(empty)* | ADX ingestion endpoint (empty = disabled) |
+
+### Local Development
 
 ```bash
-# Via Azure CLI
-az kusto script create --cluster-name <ADX> --database-name ethereum \
-  --resource-group <RG> --name setup-schema \
-  --script-content "$(cat src/etl/adx-schema.kql)"
-
-# Or paste into the ADX web explorer at https://<cluster>.kusto.windows.net
+export ERIGON_RPC_URL=http://localhost:8545
+export CH_URL=http://localhost:8123
+export CH_USER=etherwurst
+export CH_PASSWORD=etherwurst-ch-2026
+python src/etl/adx_etl.py
 ```
 
-Tables: `Blocks`, `Transactions`, `Logs`, `TokenTransfers`, `Traces`, `Contracts`, `EtlProgress`
+## ClickHouse Schema
 
-See [docs/14-adx-ethereum-analytics.md](../../docs/14-adx-ethereum-analytics.md) for the full design doc.
+Tables are created automatically by the ETL on first run. Schema is defined in `clickhouse-schema.sql`:
+
+| Table | Engine | Order By |
+|-------|--------|----------|
+| `blocks` | ReplacingMergeTree | `block_number` |
+| `transactions` | ReplacingMergeTree | `(block_number, transaction_index)` |
+| `logs` | ReplacingMergeTree | `(block_number, log_index)` |
+| `etl_progress` | ReplacingMergeTree | `dataset` |
+
+> **Note:** The `contracts` table exists in the schema but is not extracted in production (`EXTRACT_DATASETS` does not include `contracts`).
 
 ## Cost
 
-- **ADX Dev/Test SKU**: ~$0.12/hr, auto-stops when idle
-- **Daily ETL run**: ~2 hours = $0.24/day = **$7.20/month**
-- **Blob storage**: ~$20-50/month for compressed Parquet
-- **Total**: ~$30-60/month for full Ethereum analytics
+- **ClickHouse on AKS**: ~$15-30/month (single replica, modest resource requests)
+- **Persistent storage**: ~$5-10/month for ClickHouse data volume
+- **Total**: ~$20-40/month for Ethereum analytics on AKS

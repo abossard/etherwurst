@@ -26,7 +26,7 @@ User → "Investigate addresses 0xA, 0xB, 0xC for wash trading"
 │  Tools available:                                 │
 │  ├── blockscout_api(address, action)             │
 │  ├── erigon_rpc(method, params)                  │
-│  ├── databricks_sql(query)                       │
+│  ├── clickhouse_sql(query)                       │
 │  ├── trace_transaction(tx_hash)                  │
 │  ├── decode_contract_call(input_data)            │
 │  ├── get_token_transfers(address)                │
@@ -119,23 +119,26 @@ def get_storage_at(address: str, slot: int) -> str:
     return w3.eth.get_storage_at(address, slot).hex()
 ```
 
-### 3. Databricks SQL Tools (for analytics)
+### 3. ClickHouse SQL Tools (for analytics)
+
+ClickHouse runs on AKS (self-hosted via Altinity operator) at `clickhouse-ethereum-analytics.ethereum.svc.cluster.local:8123`.
+Tables: `blocks`, `transactions`, `logs`, `contracts` (matching cryo output).
 
 ```python
-from databricks import sql
+import requests
+
+CLICKHOUSE_URL = "http://clickhouse-ethereum-analytics.ethereum.svc.cluster.local:8123"
 
 def query_analytics(sql_query: str) -> list:
-    """Run analytical SQL query against indexed blockchain data"""
-    connection = sql.connect(
-        server_hostname=DATABRICKS_HOST,
-        http_path=DATABRICKS_HTTP_PATH,
-        access_token=DATABRICKS_TOKEN
+    """Run analytical SQL query against ClickHouse blockchain data"""
+    resp = requests.post(
+        CLICKHOUSE_URL,
+        params={"default_format": "JSONCompact"},
+        data=sql_query
     )
-    cursor = connection.cursor()
-    cursor.execute(sql_query)
-    columns = [desc[0] for desc in cursor.description]
-    rows = cursor.fetchall()
-    return [dict(zip(columns, row)) for row in rows]
+    result = resp.json()
+    columns = [col["name"] for col in result["meta"]]
+    return [dict(zip(columns, row)) for row in result["data"]]
 
 # Example queries the agent can construct:
 
@@ -146,13 +149,13 @@ def find_related_addresses(address: str, depth: int = 2) -> list:
             SELECT DISTINCT
                 CASE WHEN from_address = '{address}' THEN to_address ELSE from_address END as related,
                 1 as hop
-            FROM ethereum.transactions
+            FROM transactions
             WHERE from_address = '{address}' OR to_address = '{address}'
             UNION ALL
             SELECT DISTINCT
                 CASE WHEN t.from_address = h.related THEN t.to_address ELSE t.from_address END,
                 h.hop + 1
-            FROM ethereum.transactions t
+            FROM transactions t
             JOIN hops h ON t.from_address = h.related OR t.to_address = h.related
             WHERE h.hop < {depth}
         )
@@ -167,8 +170,8 @@ def get_fund_flow_summary(address: str) -> dict:
             'outflow' as direction,
             to_address as counterparty,
             COUNT(*) as tx_count,
-            SUM(CAST(value AS DECIMAL(38,0))) / 1e18 as total_eth
-        FROM ethereum.transactions
+            SUM(CAST(value AS Decimal(38,0))) / 1e18 as total_eth
+        FROM transactions
         WHERE from_address = '{address}' AND value > 0
         GROUP BY to_address
         UNION ALL
@@ -176,8 +179,8 @@ def get_fund_flow_summary(address: str) -> dict:
             'inflow',
             from_address,
             COUNT(*),
-            SUM(CAST(value AS DECIMAL(38,0))) / 1e18
-        FROM ethereum.transactions
+            SUM(CAST(value AS Decimal(38,0))) / 1e18
+        FROM transactions
         WHERE to_address = '{address}' AND value > 0
         GROUP BY from_address
         ORDER BY total_eth DESC

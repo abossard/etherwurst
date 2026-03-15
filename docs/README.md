@@ -19,6 +19,11 @@ A research collection for running a high-performance Ethereum API (like Ethersca
 | [11 - Scam Detection Playbook](./11-scam-detection-playbook.md) | Simple heuristics, on-chain verifiable checks, and phased integration plan |
 | [12 - Blockchain Analytics Database](./12-blockchain-analytics-database.md) | Database design for scalable on-chain analytics workloads |
 | [13 - AKS Erigon PVC One-Time Migration](./13-aks-erigon-pvc-one-time-migration.md) | Same-region Azure-managed runbook to move a multi-TB Erigon PVC between AKS clusters |
+| [14 - ADX Ethereum Analytics](./14-adx-ethereum-analytics.md) | *(Historical/Deprecated)* Azure Data Explorer evaluation — superseded by ClickHouse |
+| [Backend Comparison](./backend-comparison.md) | Comparison of analytics backend options (ClickHouse, ADX, Databricks, etc.) |
+| [ClickHouse Quickstart](./clickhouse-quickstart.md) | Getting started with ClickHouse on the Etherwurst cluster |
+| [Data Schema](./data-schema.md) | On-chain data schema definitions for the analytics pipeline |
+| [Workload Analysis](./workload-analysis.md) | Cluster resource analysis report for all deployed workloads |
 
 ## The Goal
 
@@ -34,7 +39,7 @@ To get there, we need these layers:
 ├─────────────────────────────────────────────────────────────────────┤
 │  LAYER 3: Analytics / Indexed Data                                   │
 │  Pre-indexed, queryable: token transfers, contract calls,           │
-│  address profiles, decoded events — Databricks / ClickHouse        │
+│  address profiles, decoded events — ClickHouse (via Altinity op.)   │
 ├─────────────────────────────────────────────────────────────────────┤
 │  LAYER 2: Block Explorer API (Etherscan-like)                        │
 │  Blockscout / Otterscan: quick lookups, address pages,              │
@@ -52,6 +57,6 @@ To get there, we need these layers:
 |----------|---------------|
 | Which EL client? | **Erigon** (smallest archive, built-in Otterscan support) or **Reth** (fastest, modular) |
 | Which block explorer? | **Blockscout** (full Etherscan replacement) or **Otterscan** (lightweight, Erigon-native) |
-| Which indexer? | **Ponder** (TypeScript, simple) or **cryo** (bulk export to parquet) |
-| Which analytics DB? | **Azure Databricks** (managed, Delta Lake, ML built-in) |
+| Which indexer? | **cryo** (bulk export to Parquet → ClickHouse) or **Ponder** (TypeScript, simple) |
+| Which analytics DB? | **ClickHouse** (deployed on AKS via Altinity operator, cryo → Parquet → ClickHouse pipeline) |
 | Which AI framework? | LLM agent with tool-use (function calling) against your APIs |

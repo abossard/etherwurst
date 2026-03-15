@@ -58,14 +58,14 @@ It's not just a node. It's a **self-hosted Etherscan + analytics engine + AI inv
 | [**Otterscan**](https://github.com/otterscan/otterscan) | Local block explorer | **Zero infrastructure** — runs entirely in your browser, talks directly to Erigon's JSON-RPC. Privacy-first, blazing fast. No databases, no indexers. |
 | [**Blockscout**](https://github.com/blockscout/blockscout) | Full Etherscan replacement | REST + GraphQL API, contract verification, token tracking, address pages. **Powers 600+ networks** including Optimism, Gnosis, and Base. Your AI agents talk to this. |
 
-### Layer 3 — Analytics & Indexing (Roadmap)
+### Layer 3 — Analytics & Indexing
 
 | Component | What | Why |
 |-----------|------|-----|
-| [**cryo**](https://github.com/paradigmxyz/cryo) | Bulk blockchain → Parquet | By Paradigm. Extract **40+ datasets** (blocks, txs, logs, traces) to Parquet files. Filter by address, topic, contract. Feed directly into Databricks/Spark. |
+| [**cryo**](https://github.com/paradigmxyz/cryo) | Bulk blockchain → Parquet | By Paradigm. Extract **40+ datasets** (blocks, txs, logs, traces) to Parquet files. Filter by address, topic, contract. Feed directly into ClickHouse. |
+| [**ClickHouse**](https://github.com/ClickHouse/ClickHouse) | Analytics DB (on AKS) | Column-oriented OLAP database deployed via the [Altinity Operator](https://github.com/Altinity/clickhouse-operator) on AKS (500Gi storage). Ingest Parquet files from cryo and run blazing-fast analytical SQL over billions of blockchain rows. |
 | [**Ponder**](https://github.com/ponder-sh/ponder) | TypeScript indexing framework | Full type safety, hot reloading, auto-generated GraphQL. Built-in reorg handling. Index exactly what your agents need. |
 | [**ethereum-etl**](https://github.com/blockchain-etl/ethereum-etl) | Streaming ETL pipeline | Battle-tested by Google BigQuery public datasets. Python + Rust implementations. Stream into Kafka, Pub/Sub, or directly to your analytics DB. |
-| **Azure Databricks** | Analytics compute | Delta Lake, auto-scaling Spark, SQL analytics. Connect to the Parquet files cryo produces. Run ML models on on-chain data. |
 
 ### Layer 4 — AI Investigation Agents (Roadmap)
 
@@ -132,7 +132,7 @@ etherwurst/
 │   ├── 02-block-explorers.md      # Blockscout + Otterscan comparison
 │   ├── 03-aks-deployment.md       # AKS setup, storage classes, costs
 │   ├── 05-indexing-etl.md         # cryo, ethereum-etl, Ponder pipelines
-│   ├── 06-analytics-platform.md   # Databricks + ClickHouse setup
+│   ├── 06-analytics-platform.md   # ClickHouse analytics setup
 │   ├── 07-ai-agents.md            # Agent architecture & investigation workflow
 │   ├── 08-architecture.md         # Full architecture diagram & roadmap
 │   ├── 09-resources-links.md      # Every tool, repo, and reference
@@ -175,6 +175,15 @@ etherwurst/
 │  │  └────────────┘          │  └───────────────────────────────────┘   │
 │  └──────────────────────────┘                                          │
 │                                                                         │
+│  ┌──────────────────────────┐                                          │
+│  │  clickhouse namespace    │                                          │
+│  │                          │                                          │
+│  │  ┌────────────┐          │                                          │
+│  │  │ ClickHouse │ 500Gi    │                                          │
+│  │  │ (Altinity) │ storage  │                                          │
+│  │  └────────────┘          │  cryo → Parquet → ClickHouse             │
+│  └──────────────────────────┘                                          │
+│                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
 │  │  flux-system          Flux Operator + Controllers + Web UI      │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
@@ -187,7 +196,7 @@ etherwurst/
 
 **Phase 1** ✅ Archive Node — Erigon + Lighthouse syncing Ethereum mainnet  
 **Phase 2** ✅ Block Explorers — Otterscan + Blockscout providing Etherscan-like access  
-**Phase 3** 🔜 Analytics — cryo → Parquet → Databricks pipeline for bulk analysis  
+**Phase 3** ✅ Analytics — cryo → Parquet → ClickHouse pipeline for bulk analysis (Altinity operator on AKS)  
 **Phase 4** 🔜 AI Agents — LLM-powered investigators that trace money flows, detect patterns, and generate reports  
 
 > The end state: **"Here are 5 addresses and a suspicion of wash trading. Investigate and report."**  
@@ -207,6 +216,8 @@ etherwurst/
 | Flux Operator | [`controlplaneio-fluxcd/flux-operator`](https://github.com/controlplaneio-fluxcd/flux-operator) | 400+ |
 | Karpenter Azure | [`Azure/karpenter-provider-azure`](https://github.com/Azure/karpenter-provider-azure) | 300+ |
 | cryo | [`paradigmxyz/cryo`](https://github.com/paradigmxyz/cryo) | 1.2k+ |
+| ClickHouse | [`ClickHouse/ClickHouse`](https://github.com/ClickHouse/ClickHouse) | 38k+ |
+| Altinity Operator | [`Altinity/clickhouse-operator`](https://github.com/Altinity/clickhouse-operator) | 1.8k+ |
 | Ponder | [`ponder-sh/ponder`](https://github.com/ponder-sh/ponder) | 1.5k+ |
 | ethereum-etl | [`blockchain-etl/ethereum-etl`](https://github.com/blockchain-etl/ethereum-etl) | 3k+ |
 | Forta | [`forta-network/forta-node`](https://github.com/forta-network/forta-node) | 200+ |
