@@ -25,9 +25,6 @@ param isDeveloper bool = true
 @description('Enable Advanced Container Networking Services (Hubble observability + FQDN policies, ~$18/node/month)')
 param enableACNS bool = true
 
-@description('Enable Azure Data Explorer (ADX) for blockchain analytics')
-param enableAdx bool = false
-
 @description('Object ID of the developer principal — auto-set by azd preprovision hook')
 param developerPrincipalId string = ''
 
@@ -55,8 +52,6 @@ var vnetName = 'vnet-${dashPrefix}'
 var acrName = 'acr${prefix}'
 var aksClusterName = 'aks-${dashPrefix}'
 var aiFoundryName = 'aif-${dashPrefix}'
-var adxClusterName = 'adx${prefix}'
-var adxDatabaseName = 'ethereum'
 var storageName = 'st${prefix}'
 var vpnPipName = 'pip-${dashPrefix}-vpn'
 var vpnGatewayResourceName = 'vpng-${dashPrefix}'
@@ -450,14 +445,14 @@ resource appFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentitie
   }
 }
 
-// ADX ETL → federated credential (sidecar in Erigon pod, ethereum namespace)
-resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = if (enableAdx) {
-  name: 'adx-etl-workload-identity'
+// ETL sidecar → federated credential (sidecar in Erigon pod, ethereum namespace)
+resource etlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
+  name: 'etl-workload-identity'
   parent: appIdentity
   dependsOn: [appFederatedCredential]
   properties: {
     issuer: aks.properties.oidcIssuerProfile.issuerURL
-    subject: 'system:serviceaccount:ethereum:adx-etl-sa'
+    subject: 'system:serviceaccount:ethereum:etl-sa'
     audiences: [workloadIdentityAudience]
   }
 }
@@ -466,7 +461,7 @@ resource adxEtlFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdenti
 resource apiFederatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2025-01-31-preview' = {
   name: 'api-workload-identity'
   parent: appIdentity
-  dependsOn: enableAdx ? [adxEtlFederatedCredential] : [appFederatedCredential]
+  dependsOn: [etlFederatedCredential]
   properties: {
     issuer: aks.properties.oidcIssuerProfile.issuerURL
     subject: 'system:serviceaccount:ethereum:hazmebeenscammed-api-sa'
@@ -784,73 +779,6 @@ resource devAIFoundryRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-// ─── Azure Data Explorer (blockchain analytics) ──────────────────────
-
-resource adxCluster 'Microsoft.Kusto/clusters@2024-04-13' = if (enableAdx) {
-  name: adxClusterName
-  location: location
-  sku: {
-    name: 'Dev(No SLA)_Standard_D11_v2'
-    tier: 'Basic'
-    capacity: 1
-  }
-  identity: { type: 'SystemAssigned' }
-  properties: {
-    enableStreamingIngest: true
-    enableAutoStop: true
-    enableDiskEncryption: true
-    publicNetworkAccess: publicAccess
-  }
-}
-
-resource adxDatabase 'Microsoft.Kusto/clusters/databases@2024-04-13' = if (enableAdx) {
-  name: adxDatabaseName
-  parent: adxCluster
-  location: location
-  kind: 'ReadWrite'
-  properties: {
-    hotCachePeriod: 'P7D'
-    softDeletePeriod: 'P365D'
-  }
-}
-
-// App identity → ADX Database Ingestor (ETL writes via managed identity)
-resource appAdxIngestor 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (enableAdx) {
-  name: 'app-ingestor'
-  parent: adxDatabase
-  properties: {
-    principalId: appIdentity.properties.clientId
-    principalType: 'App'
-    role: 'Ingestor'
-  }
-}
-
-// App identity → ADX Database Viewer (ETL reads progress, queries tables)
-resource appAdxViewer 'Microsoft.Kusto/clusters/databases/principalAssignments@2024-04-13' = if (enableAdx) {
-  name: 'app-viewer'
-  parent: adxDatabase
-  properties: {
-    principalId: appIdentity.properties.clientId
-    principalType: 'App'
-    role: 'Viewer'
-  }
-}
-
-// Developer → ADX Database Admin (handled in postprovision hook to avoid
-// conflicts with pre-existing principal assignments that share the same role+principal)
-
-// ─── ADX Schema (applied idempotently via .create-merge) ─────────────
-
-resource adxSchema 'Microsoft.Kusto/clusters/databases/scripts@2024-04-13' = if (enableAdx) {
-  name: 'ethereum-schema'
-  parent: adxDatabase
-  properties: {
-    continueOnErrors: true
-    forceUpdateTag: 'v2-cryo-string-types'
-    scriptContent: loadTextContent('../src/etl/adx-schema.kql')
-  }
-}
-
 // ─── VPN Gateway (P2S with Entra ID auth) ────────────────────────────
 
 resource vpnPip 'Microsoft.Network/publicIPAddresses@2025-05-01' = if (privateNetworking) {
@@ -911,17 +839,6 @@ resource acrPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetw
   }
 }
 
-resource adxPe 'Microsoft.Network/privateEndpoints@2025-05-01' = if (privateNetworking && enableAdx) {
-  name: 'pe-${dashPrefix}-adx'
-  location: location
-  properties: {
-    subnet: { id: snetPeId }
-    privateLinkServiceConnections: [
-      { name: 'adx', properties: { privateLinkServiceId: adxCluster.id, groupIds: ['cluster'] } }
-    ]
-  }
-}
-
 // ─── Outputs (azd maps AZURE_ prefixed outputs to env vars) ─────────
 
 output AZURE_AKS_CLUSTER_NAME string = aks.name
@@ -942,9 +859,6 @@ output AZURE_APPLICATIONINSIGHTS_CONNECTION_STRING string = appInsights.properti
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output AZURE_ALB_SUBNET_ID string = snetAlbId
 output AZURE_AGC_WAF_POLICY_ID string = agcWafPolicy.id
-output AZURE_ADX_CLUSTER_URI string = enableAdx ? adxCluster.properties.uri : ''
-output AZURE_ADX_CLUSTER_NAME string = enableAdx ? adxCluster.name : ''
-output AZURE_ADX_DATABASE_NAME string = enableAdx ? adxDatabaseName : ''
 output AZURE_SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_INGRESS_PUBLIC_IP string = ingressPip.properties.ipAddress
