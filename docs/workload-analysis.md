@@ -259,13 +259,13 @@
 
 ---
 
-### 1.9 ETL Sidecar (ClickHouse Pipeline — formerly ADX ETL CronJob)
+### 1.9 ETL Sidecar (ClickHouse Pipeline)
 
 | Property | Value |
 |----------|-------|
 | **Kind** | Sidecar container (`etl-sidecar`) in the Erigon StatefulSet pod |
 | **Namespace** | ethereum |
-| **Target** | ClickHouse only (ADX_CLUSTER_URI is empty) |
+| **Target** | ClickHouse |
 | **Mode** | `SIDECAR_MODE=true`, 60s loop sleep between extraction cycles |
 | **Temp Storage** | 10 GiB emptyDir for cryo extraction scratch space |
 
@@ -275,10 +275,7 @@
 
 **Assessment:**
 - **Resources:** ✅ Appropriate for a long-running sidecar performing periodic cryo extraction and ClickHouse ingestion. The 4 CPU / 4 GiB limits allow burst during heavy extraction windows while the modest 500m / 512 MiB requests keep scheduling impact low. The 10 GiB emptyDir provides scratch space for temporary cryo parquet files.
-- **Why sidecar instead of CronJob:** Co-locating the ETL in the Erigon pod gives it localhost RPC access (`127.0.0.1:8545`), eliminating network hops and dramatically improving extraction throughput. The `SIDECAR_MODE=true` flag runs the ETL in an infinite loop with a 60s sleep between cycles, replacing the previous `*/10 * * * *` CronJob schedule.
-- **Why configured this way:** The old CronJob approach suffered from scheduling failures (see §5.7 historical evidence below) and network latency to Erigon. The sidecar approach guarantees the ETL always runs where Erigon is, sharing the dedicated ethereum node. Azure Data Explorer was evaluated but not selected — ClickHouse was chosen instead (see [14 - ADX Ethereum Analytics](./14-adx-ethereum-analytics.md) for historical context).
-
-> **Historical note:** The original ADX ETL CronJob was removed after repeated scheduling failures and replaced by the sidecar approach documented here.
+- **Why sidecar:** Co-locating the ETL in the Erigon pod gives it localhost RPC access (`127.0.0.1:8545`), eliminating network hops and dramatically improving extraction throughput. The `SIDECAR_MODE=true` flag runs the ETL in an infinite loop with a 60s sleep between cycles.
 
 ---
 
@@ -468,9 +465,6 @@ The ethereum-dedicated node consistently shows **20–38% iowait**. This is Erig
 
 **Evidence (multiple pods):**
 ```
-FailedScheduling  adx-etl-manual-1772476100-vk2z2        (historical — CronJob replaced by etl-sidecar)
-  "0/6 nodes: 1 Insufficient cpu, 2 untolerated taints, 4 Insufficient memory"
-
 FailedScheduling  chi-ethereum-analytics-analytics-0-0-0
   "0/4 nodes: 1 untolerated taint, 3 Insufficient cpu, 3 Insufficient memory"
 
@@ -480,7 +474,7 @@ FailedScheduling  hazmebeenscammed-api-cf6c4f9b6-8s7vm
 
 Multiple pods — including the production HazMeBeenScammed app and ClickHouse — experienced `FailedScheduling` at some point because no node had enough allocatable resources. Karpenter eventually provisioned new nodes, but there was a **scheduling gap**.
 
-**Connection to resources:** The ClickHouse request of 2 CPU + 8 GiB makes it particularly hard to schedule. The former ADX ETL CronJob (250m CPU + 512 MiB) also couldn't fit, blocked by 4 nodes with insufficient memory — this was one of the motivations for replacing the CronJob with the `etl-sidecar` in the Erigon pod. This validates the recommendation to right-size ClickHouse requests.
+**Connection to resources:** The ClickHouse request of 2 CPU + 8 GiB makes it particularly hard to schedule. This validates the recommendation to right-size ClickHouse requests.
 
 ### 5.5 🟠 OOMKilled — ama-logs Agent
 
@@ -515,21 +509,7 @@ Almost all high-restart pods are on the **system node**. The pattern is consiste
 
 **Key insight:** Exit code 137 (SIGKILL) on cilium-operator confirms the kernel OOM killer or Kubernetes is forcefully terminating containers. Exit code 143 (SIGTERM) on ama-logs confirms liveness probe-triggered graceful shutdown.
 
-### 5.7 🟡 ADX ETL Job Failures (Historical — CronJob replaced by sidecar)
-
-**Evidence (historical — these events occurred before the ADX ETL CronJob was replaced by the `etl-sidecar` container in the Erigon pod):**
-```
-BackOff  adx-etl-manual-1772476100-vk2z2  "Back-off restarting failed container install-cryo"
-BackOff  adx-etl-manual-run-dts8q          "Back-off restarting failed container etl"
-BackOff  adx-etl-run2-pfc7l               "Back-off restarting failed container etl"
-BackoffLimitExceeded  adx-etl-manual-1772476100  "Job has reached the specified backoff limit"
-```
-
-Three separate ADX ETL manual runs failed. The first had an init container `install-cryo` that failed (likely a missing binary or network issue). The subsequent runs failed at the `etl` container itself. Combined with the `FailedScheduling` event above, these jobs struggled to even get scheduled, then failed when they did.
-
-> **Note:** The ADX ETL CronJob has been replaced by the `etl-sidecar` container running inside the Erigon pod (see §1.9). The sidecar approach eliminates the scheduling failures documented here by co-locating the ETL with Erigon on the dedicated ethereum node. These historical failures are retained as evidence supporting that architectural decision.
-
-### 5.8 Summary: Events Corroborating Resource Recommendations
+### 5.7 Summary: Events Corroborating Resource Recommendations
 
 | Recommendation | Supporting Evidence |
 |---------------|-------------------|

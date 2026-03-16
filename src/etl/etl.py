@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Ethereum ETL — Micro-batch Pipeline
-Erigon → cryo (Rust) → Parquet → ADX + ClickHouse
+Erigon → cryo (Rust) → Parquet → ClickHouse
 
 Architecture:
   Processes blocks in small batches (default 500). Each batch:
     1. cryo extracts one dataset → Parquet files on disk
-    2. ingest_from_file sends each file to ADX and/or ClickHouse
+    2. HTTP POST sends each file to ClickHouse
     3. Cleanup Parquet files
     4. Save progress
 
@@ -15,10 +15,6 @@ Architecture:
 
 Environment:
   ERIGON_RPC_URL          Erigon JSON-RPC endpoint
-  ADX_CLUSTER_URI         ADX cluster URI (set to enable ADX)
-  ADX_DATABASE            ADX database name
-  AZURE_RESOURCE_GROUP    Azure resource group (for ADX start/stop)
-  STOP_ADX_AFTER          Stop ADX cluster after run (default: false)
   CH_URL                  ClickHouse HTTP endpoint (set to enable CH)
   CH_USER                 ClickHouse username
   CH_PASSWORD             ClickHouse password
@@ -40,13 +36,6 @@ import requests as req
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 ERIGON_RPC = os.environ.get("ERIGON_RPC_URL", "http://erigon:8545")
-
-# ADX target (enabled when ADX_CLUSTER_URI is set)
-ADX_CLUSTER_URI = os.environ.get("ADX_CLUSTER_URI", "")
-ADX_ENABLED = bool(ADX_CLUSTER_URI)
-ADX_DATABASE = os.environ.get("ADX_DATABASE", "ethereum")
-AZURE_RESOURCE_GROUP = os.environ.get("AZURE_RESOURCE_GROUP", "")
-STOP_ADX_AFTER = os.environ.get("STOP_ADX_AFTER", "false").lower() == "true"
 
 # ClickHouse target (enabled when CH_URL is set)
 CH_URL = os.environ.get("CH_URL", "")
@@ -73,15 +62,8 @@ LOOP_SLEEP_SECS = int(os.environ.get("LOOP_SLEEP_SECS", "1800"))
 
 WORK_DIR = "/tmp/cryo-extract"
 
-# cryo dataset → ADX table / ClickHouse table mapping
-ALL_DATASETS = {
-    "blocks": "Blocks",
-    "transactions": "Transactions",
-    "logs": "Logs",
-    "contracts": "Contracts",
-}
-# ClickHouse uses lowercase table names
-ALL_CH_TABLES = {
+# cryo dataset → ClickHouse table mapping
+CH_TABLES = {
     "blocks": "blocks",
     "transactions": "transactions",
     "logs": "logs",
@@ -92,11 +74,7 @@ ALL_CH_TABLES = {
 _ds_filter = os.environ.get("EXTRACT_DATASETS", "")
 if _ds_filter:
     _wanted = {d.strip() for d in _ds_filter.split(",")}
-    DATASETS = {k: v for k, v in ALL_DATASETS.items() if k in _wanted}
-    CH_TABLES = {k: v for k, v in ALL_CH_TABLES.items() if k in _wanted}
-else:
-    DATASETS = ALL_DATASETS
-    CH_TABLES = ALL_CH_TABLES
+    CH_TABLES = {k: v for k, v in CH_TABLES.items() if k in _wanted}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,72 +123,6 @@ def cleanup():
     subprocess.run(["rm", "-rf", WORK_DIR], capture_output=True)
 
 
-# ── ADX client setup (conditional) ────────────────────────────────────────────
-
-def get_kusto_client():
-    if not ADX_ENABLED:
-        return None
-    from azure.identity import DefaultAzureCredential
-    from azure.kusto.data import KustoClient, KustoConnectionStringBuilder
-    credential = DefaultAzureCredential()
-    kcsb = KustoConnectionStringBuilder.with_azure_token_credential(ADX_CLUSTER_URI, credential)
-    return KustoClient(kcsb)
-
-
-def get_ingest_client():
-    if not ADX_ENABLED:
-        return None
-    from azure.identity import DefaultAzureCredential
-    from azure.kusto.ingest import QueuedIngestClient
-    from azure.kusto.data import KustoConnectionStringBuilder
-    credential = DefaultAzureCredential()
-    ingest_uri = ADX_CLUSTER_URI.replace("https://", "https://ingest-")
-    kcsb = KustoConnectionStringBuilder.with_azure_token_credential(ingest_uri, credential)
-    return QueuedIngestClient(kcsb)
-
-
-def kusto_query(client, query):
-    if not client:
-        return []
-    response = client.execute(ADX_DATABASE, query)
-    return [row for row in response.primary_results[0]]
-
-
-# ── ADX cluster management ───────────────────────────────────────────────────
-
-def ensure_adx_running():
-    if not ADX_ENABLED:
-        return
-    cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
-    result = subprocess.run(
-        ["az", "kusto", "cluster", "show", "--name", cluster_name,
-         "--resource-group", AZURE_RESOURCE_GROUP, "--query", "state", "-o", "tsv"],
-        capture_output=True, text=True, timeout=60
-    )
-    state = result.stdout.strip()
-    print(f"  ADX cluster state: {state}")
-    if state == "Stopped":
-        print("  Starting ADX cluster...")
-        run(["az", "kusto", "cluster", "start", "--name", cluster_name,
-             "--resource-group", AZURE_RESOURCE_GROUP], timeout=600)
-        run(["az", "kusto", "cluster", "wait", "--name", cluster_name,
-             "--resource-group", AZURE_RESOURCE_GROUP,
-             "--custom", "provisioningState=='Succeeded'"], timeout=600)
-        print("  ADX cluster started.")
-
-
-def stop_adx():
-    if not ADX_ENABLED:
-        return
-    cluster_name = ADX_CLUSTER_URI.split("//")[1].split(".")[0]
-    print("  Stopping ADX cluster...")
-    subprocess.run(
-        ["az", "kusto", "cluster", "stop", "--name", cluster_name,
-         "--resource-group", AZURE_RESOURCE_GROUP, "--no-wait"],
-        capture_output=True, text=True, timeout=60
-    )
-
-
 # ── ClickHouse ingestion ─────────────────────────────────────────────────────
 
 def ingest_to_clickhouse(parquet_file, ch_table):
@@ -254,16 +166,7 @@ def update_ch_progress(block_num):
 
 # ── ETL progress tracking ────────────────────────────────────────────────────
 
-def get_last_ingested_block(client):
-    # Try ADX first
-    if client:
-        try:
-            rows = kusto_query(client, f"EtlProgress | where dataset == '{WORKER_ID}' | summarize max(last_block)")
-            if rows and rows[0][0] is not None:
-                return int(rows[0][0])
-        except Exception as e:
-            print(f"  Warning: Could not read ADX progress: {e}")
-    # Fall back to ClickHouse
+def get_last_ingested_block():
     if CH_ENABLED:
         try:
             resp = _session.get(CH_URL, params={
@@ -278,26 +181,16 @@ def get_last_ingested_block(client):
     return 0
 
 
-def update_progress(client, block_num):
-    if not client:
-        return
-    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        kusto_query(client, f".ingest inline into table EtlProgress <| {WORKER_ID},{block_num},{ts}")
-    except Exception as e:
-        print(f"  Warning: Could not update progress: {e}")
-
-
 # ── Micro-batch processing ───────────────────────────────────────────────────
 
-def process_batch(batch_start, batch_end, ingest_client):
+def process_batch(batch_start, batch_end):
     """Extract, ingest, and cleanup one micro-batch of blocks."""
     cleanup()
     os.makedirs(WORK_DIR, exist_ok=True)
     files_ingested = 0
 
     # Extract ALL datasets in a single cryo pass (one RPC sweep)
-    dataset_names = list(DATASETS.keys())
+    dataset_names = list(CH_TABLES.keys())
     cmd = [
         "cryo", *dataset_names,
         "-b", f"{batch_start}:{batch_end}",
@@ -313,8 +206,7 @@ def process_batch(batch_start, batch_end, ingest_client):
 
     # Ingest each dataset's parquet files into the corresponding table
     for dataset in dataset_names:
-        table = DATASETS[dataset]
-        ch_table = CH_TABLES.get(dataset)
+        ch_table = CH_TABLES[dataset]
 
         # cryo names files like ethereum__<dataset>__*.parquet
         parquet_files = globmod.glob(f"{WORK_DIR}/**/*{dataset}*.parquet", recursive=True)
@@ -322,33 +214,14 @@ def process_batch(batch_start, batch_end, ingest_client):
             parquet_files = globmod.glob(f"{WORK_DIR}/*{dataset}*.parquet")
 
         if not parquet_files:
-            print(f"    {table}: no files produced")
+            print(f"    {ch_table}: no files produced")
             continue
 
-        # Ingest each file
-        adx_props = None
-        if ADX_ENABLED and ingest_client:
-            from azure.kusto.ingest import IngestionProperties
-            from azure.kusto.data import DataFormat
-            adx_props = IngestionProperties(
-                database=ADX_DATABASE,
-                table=table,
-                data_format=DataFormat.PARQUET,
-            )
-
         for f in parquet_files:
-            if adx_props:
-                ingest_client.ingest_from_file(f, ingestion_properties=adx_props)
-            if ch_table:
-                ingest_to_clickhouse(f, ch_table)
+            ingest_to_clickhouse(f, ch_table)
             files_ingested += 1
 
-        tags = []
-        if ADX_ENABLED:
-            tags.append("ADX")
-        if CH_ENABLED:
-            tags.append("CH")
-        print(f"    {table}: {len(parquet_files)} files ingested → {'+'.join(tags)}")
+        print(f"    {ch_table}: {len(parquet_files)} files ingested → CH")
 
     cleanup()
     return files_ingested
@@ -359,47 +232,26 @@ def process_batch(batch_start, batch_end, ingest_client):
 def main():
     print("═══ ETL (Micro-batch) starting ═══")
     print(f"  Erigon:  {ERIGON_RPC}")
-    print(f"  ADX:     {ADX_CLUSTER_URI if ADX_ENABLED else 'disabled'}")
     print(f"  CH:      {CH_URL if CH_ENABLED else 'disabled'}")
     print(f"  Batch:   {BATCH_SIZE} blocks")
     print(f"  cryo:    concurrency={CRYO_CONCURRENCY}, chunk={CRYO_CHUNK_SIZE}, rps={CRYO_RPS}")
 
-    if not ADX_ENABLED and not CH_URL:
-        print("  ERROR: No ingest target configured (set ADX_ENABLED or CH_ENABLED)")
+    if not CH_ENABLED:
+        print("  ERROR: No ingest target configured (set CH_URL)")
         sys.exit(1)
 
     wait_for_erigon()
 
-    # Azure CLI login (needed for ADX; skip if ADX disabled)
-    if ADX_ENABLED:
-        client_id = os.environ.get("AZURE_CLIENT_ID", "")
-        tenant_id = os.environ.get("AZURE_TENANT_ID", "")
-        token_file = os.environ.get("AZURE_FEDERATED_TOKEN_FILE", "")
-        if client_id and tenant_id and token_file:
-            with open(token_file) as f:
-                token = f.read().strip()
-            run(["az", "login", "--service-principal",
-                 "-u", client_id, "-t", tenant_id,
-                 "--federated-token", token,
-                 "--allow-no-subscriptions"], timeout=60)
-        else:
-            run(["az", "login", "--identity", "--allow-no-subscriptions"], timeout=60)
-
     chain_head = get_chain_head()
     print(f"  Chain head: {chain_head}")
     print(f"  Worker:  {WORKER_ID}")
-
-    ensure_adx_running()
-
-    kusto = get_kusto_client()
-    ingest = get_ingest_client()
 
     # Determine block range — explicit overrides take priority
     if START_BLOCK is not None:
         start = int(START_BLOCK)
         print(f"  Explicit START_BLOCK: {start}")
     else:
-        last_block = get_last_ingested_block(kusto)
+        last_block = get_last_ingested_block()
         print(f"  Last ingested ({WORKER_ID}): {last_block}")
         if last_block == 0:
             start = max(chain_head - FIRST_RUN_LOOKBACK, 0)
@@ -433,12 +285,11 @@ def main():
         print(f"\n── Batch {batch_idx + 1}/{n_batches}: blocks {batch_start}→{batch_end - 1} ──")
 
         try:
-            files = process_batch(batch_start, batch_end, ingest)
+            files = process_batch(batch_start, batch_end)
             total_files += files
             batches_done += 1
 
             # Save progress after each successful batch
-            update_progress(kusto, batch_end - 1)
             update_ch_progress(batch_end - 1)
 
             elapsed = time.time() - t_batch
@@ -454,14 +305,6 @@ def main():
     elapsed = time.time() - t_total
     print(f"\n═══ ETL complete in {elapsed:.0f}s ═══")
     print(f"  {batches_done}/{n_batches} batches, {total_files} files ingested")
-
-    if STOP_ADX_AFTER:
-        stop_adx()
-
-
-def run_once():
-    """Single ETL run — used by both CronJob and sidecar loop."""
-    main()
 
 
 if __name__ == "__main__":

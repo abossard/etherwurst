@@ -634,7 +634,7 @@ def print_analysis():
 │    • At best, async Python reaches ~500 blocks/sec (aiohttp + ujson)     │
 │    • cryo does 1500+ blocks/sec with less memory                          │
 │    • Gap: 3-10× — fundamentally limited by Python's GIL and memory model │
-│    • Your adx_etl.py already uses cryo — this is the right approach!      │
+│    • Your etl.py already uses cryo — this is the right approach!      │
 │                                                                             │
 │ When Python IS the right choice:                                           │
 │    • Prototyping and debugging ETL logic                                   │
@@ -659,7 +659,7 @@ Hardware baseline: Erigon on NVMe SSD, 8 cores, 32GB RAM, local network (<1ms RT
 │ 2. requests.Session (batch 50)  │  100-300 │  ~80MB │ 1 RTT per 50 blocks │
 │ 3. aiohttp (32×, batch 50)     │  300-800 │ ~150MB │ 32 batches in flight │
 │ 4. aiohttp + ujson (32×, b 50) │  400-1000│ ~140MB │ ~15-25% faster parse │
-│ 5. cryo (Rust, for reference)  │ 500-1500 │  ~60MB │ Used by adx_etl.py   │
+│ 5. cryo (Rust, for reference)  │ 500-1500 │  ~60MB │ Used by etl.py       │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 Over a cloud network (1-5ms RTT to Erigon pod in same AKS cluster):
@@ -677,7 +677,7 @@ The jump from 3→5 (2-3×) comes from Rust (no GIL, SIMD JSON, zero-copy).
 
 Your current setup:
   - ethereum_etl.py uses approach 1 (urllib, no batching despite RPC_BATCH=10)
-  - adx_etl.py uses approach 5 (cryo) — already optimal!
+  - etl.py uses approach 5 (cryo) — already optimal!
   - Recommendation: keep cryo for bulk ETL, use approach 3/4 only for
     real-time or small-batch scenarios where cryo's startup overhead hurts.
 """
