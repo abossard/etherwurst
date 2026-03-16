@@ -373,7 +373,7 @@ Azure Data Explorer (analytics)
    - Tracking which blocks have been extracted (checkpoint in ADX or blob metadata)
    - Triggering cryo for missing block ranges
    - Triggering ADX ingestion from blob
-   - Running as an Azure Container Instance or K8s CronJob
+   - Running as a sidecar container in the Erigon pod
 
 ### cryo Datasets → ADX Tables Mapping
 
@@ -590,47 +590,40 @@ resource adxCluster 'Microsoft.Kusto/clusters@2023-08-15' = {
 - Data is preserved (stored in Azure Storage, not lost)
 - No compute charges while stopped; only storage charges apply
 
-### ETL Scheduling Strategy (Implemented)
+### ETL Strategy (Implemented)
 
-The ETL runs as a Flux-managed Kubernetes CronJob using a **micro-batch architecture**:
+The ETL runs as a **sidecar container** (`etl-sidecar`) in the Erigon StatefulSet pod, using a **continuous micro-batch architecture**:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Daily Schedule (UTC)                                    │
+│  Continuous Sidecar Loop                                 │
 │                                                          │
-│  02:00 ─── CronJob: adx-etl-sync triggers               │
-│            1. az login (workload identity)                │
-│            2. Query chain head from Erigon                │
-│            3. Ensure ADX cluster is running               │
-│            4. Read last progress from EtlProgress table   │
-│            5. Process blocks in 1000-block micro-batches: │
+│  etl-sidecar (in erigon-0 pod):                         │
+│            1. Query chain head from Erigon (localhost)    │
+│            2. Read last progress from ClickHouse          │
+│            3. Process blocks in micro-batches:            │
 │               a. cryo extract (blocks/txs/logs → Parquet) │
-│               b. ingest_from_file → ADX (SDK staging)    │
+│               b. Ingest into ClickHouse                   │
 │               c. Cleanup Parquet, save progress           │
-│            6. Stop ADX cluster (STOP_ADX_AFTER=true)     │
+│            4. Sleep LOOP_SLEEP_SECS, repeat               │
 │                                                          │
-│  Performance: ~3-5 blocks/sec with concurrency=6         │
-│  Daily catch-up of ~7,200 blocks takes ~30 min           │
-│  Cost: ~$0.12/hr × 1hr = $0.12/day = $3.60/month       │
-│  + storage: ~$5-10/month for compressed Parquet          │
-│  Total: ~$10-15/month for full Ethereum analytics        │
 └─────────────────────────────────────────────────────────┘
 ```
 
 **Key design decisions:**
-- **Micro-batch (not monolithic):** Bounds memory to ~200MB regardless of total block range
-- **ingest_from_file (not blob):** SDK handles staging automatically, no blob container needed
-- **Incremental progress:** Crash only loses current 1000-block batch, resumes from last checkpoint
-- **ADX auto-stop:** Cluster stops after ETL completes, wakes on next query/run
+- **Sidecar (not CronJob):** Co-located with Erigon for localhost RPC access, runs continuously
+- **Micro-batch (not monolithic):** Bounds memory per batch regardless of total block range
+- **Incremental progress:** Crash only loses current batch, resumes from last checkpoint
 
 **Configuration (via Flux ConfigMap substitution):**
 ```yaml
-BATCH_SIZE: "1000"        # Blocks per micro-batch
-CRYO_CONCURRENCY: "6"    # Parallel RPC requests
-CRYO_CHUNK_SIZE: "2000"  # cryo internal chunking
-CRYO_RPS: "50"           # Rate limit on Erigon RPC
-MAX_BLOCKS: "100000"     # Max blocks per run
-STOP_ADX_AFTER: "true"   # Stop ADX when done
+BATCH_SIZE: "50000"       # Blocks per micro-batch
+CRYO_CONCURRENCY: "64"   # Parallel RPC requests
+CRYO_CHUNK_SIZE: "50000"  # cryo internal chunking
+CRYO_RPS: "0"             # No rate limit (localhost)
+MAX_BLOCKS: "25000000"    # Max blocks per run
+LOOP_SLEEP_SECS: "60"     # Sleep between loops
+SIDECAR_MODE: "true"      # Continuous loop mode
 ```
 
 ### Incremental vs Full Sync
@@ -643,7 +636,7 @@ STOP_ADX_AFTER: "true"   # Stop ADX when done
 
 **Recommended approach:**
 1. **One-time backfill**: Run cryo for full historical data (blocks 0 → current), output to Parquet in Blob Storage, ingest into ADX over a few days with cluster running
-2. **Daily incremental**: CronJob extracts new blocks since last run, uploads to blob, ADX auto-ingests
+2. **Continuous incremental**: Sidecar extracts new blocks since last run, ingests into ClickHouse
 3. **Optional real-time tail**: If investigation latency matters, enable streaming ingestion for new blocks
 
 ### Cluster Sizing for Ethereum Data
@@ -765,8 +758,8 @@ union hop1, hop2, hop3
 │       │ JSON-RPC (eth_getBlock, eth_getBlockReceipts, trace_block)               │
 │       ▼                                                                          │
 │  ┌────────────────┐        ┌──────────────────────┐                             │
-│  │  cryo CronJob  │───────►│  Azure Blob Storage  │                             │
-│  │  (Rust, fast)  │ Parquet│  (staging area)      │                             │
+│  │ cryo sidecar   │───────►│  ClickHouse          │                             │
+│  │ (etl-sidecar)  │Parquet │  (ethereum-analytics) │                             │
 │  └────────────────┘        └──────────┬───────────┘                             │
 │                                       │                                          │
 │  ┌──────────────┐  ┌────────────┐     │ Event Grid trigger                      │
@@ -796,7 +789,7 @@ union hop1, hop2, hop3
 |-------|------|----------|------|
 | **3a** | Deploy ADX Dev/Test cluster, create schema | Day 1 | $0 (auto-stop) |
 | **3b** | Run cryo backfill for recent 1M blocks → Parquet → Blob → ADX | Week 1 | ~$10 |
-| **3c** | Set up Event Grid auto-ingestion + daily cryo CronJob | Week 2 | ~$7-30/mo ongoing |
+| **3c** | Set up ETL sidecar + ClickHouse ingestion pipeline | Week 2 | ~$7-30/mo ongoing |
 | **3d** | Build KQL investigation queries + materialized views | Week 3 | $0 |
 | **3e** | Point HazMeBeenScammed + AI agents at ADX REST API | Week 4 | $0 |
 | **3f** | Optional: Full historical backfill (all 21M blocks) | Month 2 | ~$50-100 one-time |
@@ -868,13 +861,13 @@ Key findings applied to this implementation:
 - **Managed identity**: Blob URLs use `;managed_identity=system` — no SAS tokens needed.
 - **Batching policy**: 5-minute default is appropriate for daily batch ETL. Lower only for near-real-time scenarios.
 
-### CronJob Configuration
+### Sidecar Configuration
 
-- **Schedule**: `0 2 * * *` (daily at 02:00 UTC)
+- **Deployment**: Sidecar container `etl-sidecar` in `erigon-0` pod (defined in `clusters/etherwurst/apps/erigon.yaml`)
 - **Image**: `${ACR_LOGIN_SERVER}/adx-etl:latest`
-- **Max blocks/run**: 100,000 (configurable via `MAX_BLOCKS`)
-- **ADX auto-stop**: Cluster stops after idle period, ETL starts it automatically
-- **Cost**: ~$0.24/day ($7.20/month) compute + ~$20-50/month storage
+- **Mode**: `SIDECAR_MODE=true` — continuous loop with `LOOP_SLEEP_SECS=60`
+- **Max blocks/run**: 25,000,000 (configurable via `MAX_BLOCKS`)
+- **Resources**: 500m–4 CPU, 2–16Gi memory
 
 ### Files
 
@@ -884,7 +877,7 @@ Key findings applied to this implementation:
 | `src/etl/adx_etl.py` | Python orchestrator (cryo → blob → ADX) |
 | `src/etl/adx-schema.kql` | ADX table definitions, policies, mappings |
 | `src/etl/requirements.txt` | Python dependencies |
-| `clusters/etherwurst/apps/adx-etl.yaml` | K8s CronJob + ServiceAccount (Flux-managed) |
+| `clusters/etherwurst/apps/erigon.yaml` | Erigon StatefulSet with ETL sidecar (Flux-managed) |
 
 ---
 
