@@ -47,7 +47,7 @@ spec:
         - ReadWriteOnce
     resources:
       requests:
-        cpu: "8"
+        cpu: "6"
         memory: "32Gi"
     extraArgs:
       - --prune.mode=archive
