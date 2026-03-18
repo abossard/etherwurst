@@ -16,13 +16,13 @@ spec:
   resourcePolicy:
     containerPolicies:
       - containerName: erigon
-        maxAllowed:
+        minAllowed:
           cpu: "8"
-          memory: "48Gi"
+          memory: "32Gi"
       - containerName: etl-sidecar
-        maxAllowed:
-          cpu: "2"
-          memory: "4Gi"
+        minAllowed:
+          cpu: "500m"
+          memory: "2Gi"
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
