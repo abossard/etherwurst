@@ -47,8 +47,8 @@ spec:
         - ReadWriteOnce
     resources:
       requests:
-        cpu: "2"
-        memory: "16Gi"
+        cpu: "8"
+        memory: "32Gi"
     extraArgs:
       - --prune.mode=archive
       - --http.api=eth,net,web3,trace,debug,txpool,erigon,ots
@@ -56,9 +56,9 @@ spec:
       - --ws.compression
       - --private.api.addr=0.0.0.0:9090
       - --db.pagesize=16KB
-      - --rpc.batch.concurrency=8
+      - --rpc.batch.concurrency=16
       - --rpc.batch.limit=200
-      - --db.read.concurrency=32
+      - --db.read.concurrency=64
     p2pNodePort:
       enabled: false
     tolerations:
@@ -124,7 +124,7 @@ spec:
             value: "/tmp"
         resources:
           requests: { cpu: 500m, memory: 512Mi }
-          limits: { cpu: "4", memory: 4Gi }
+          limits: { memory: 4Gi }
         volumeMounts:
           - name: etl-temp
             mountPath: /tmp/cryo-extract
