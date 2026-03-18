@@ -1,0 +1,231 @@
+# ─── Parallel ETL backfill workers ─────────────────────────────────────────────
+# Temporary Jobs to accelerate the initial ClickHouse backfill.
+# Each worker covers a different block range and tracks independent progress.
+# Delete this file once backfill is complete.
+#
+# Current data state:
+#   - Old ETL data covers blocks 0 → 9,549,999
+#   - Sidecar is re-ingesting from ~5M upward (will eventually catch chain head)
+#   - These workers cover 9.55M → 24.6M in parallel
+# ───────────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-backfill-1
+  namespace: ethereum
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: etl-backfill
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: etl-sa
+      restartPolicy: OnFailure
+      tolerations:
+        - key: ethereum-node
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values: ["ethereum"]
+      containers:
+        - name: etl
+          image: ${ACR_LOGIN_SERVER}/etl:latest
+          imagePullPolicy: Always
+          env:
+            - name: ERIGON_RPC_URL
+              value: "http://erigon:8545"
+            - name: CH_URL
+              value: "http://clickhouse-ethereum-analytics:8123/?database=ethereum"
+            - name: CH_USER
+              value: "etherwurst"
+            - name: CH_PASSWORD
+              value: "etherwurst-ch-2026"
+            - name: WORKER_ID
+              value: "backfill-1"
+            - name: START_BLOCK
+              value: "9550000"
+            - name: END_BLOCK
+              value: "14600000"
+            - name: BATCH_SIZE
+              value: "10000"
+            - name: MAX_BLOCKS
+              value: "25000000"
+            - name: CRYO_CONCURRENCY
+              value: "48"
+            - name: CRYO_CHUNK_SIZE
+              value: "10000"
+            - name: CRYO_RPS
+              value: "0"
+            - name: EXTRACT_DATASETS
+              value: "blocks,transactions,logs"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: HOME
+              value: "/tmp"
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "4", memory: 4Gi }
+          volumeMounts:
+            - name: etl-temp
+              mountPath: /tmp/cryo-extract
+      volumes:
+        - name: etl-temp
+          emptyDir:
+            sizeLimit: 10Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-backfill-2
+  namespace: ethereum
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: etl-backfill
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: etl-sa
+      restartPolicy: OnFailure
+      tolerations:
+        - key: ethereum-node
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values: ["ethereum"]
+      containers:
+        - name: etl
+          image: ${ACR_LOGIN_SERVER}/etl:latest
+          imagePullPolicy: Always
+          env:
+            - name: ERIGON_RPC_URL
+              value: "http://erigon:8545"
+            - name: CH_URL
+              value: "http://clickhouse-ethereum-analytics:8123/?database=ethereum"
+            - name: CH_USER
+              value: "etherwurst"
+            - name: CH_PASSWORD
+              value: "etherwurst-ch-2026"
+            - name: WORKER_ID
+              value: "backfill-2"
+            - name: START_BLOCK
+              value: "14600000"
+            - name: END_BLOCK
+              value: "19650000"
+            - name: BATCH_SIZE
+              value: "10000"
+            - name: MAX_BLOCKS
+              value: "25000000"
+            - name: CRYO_CONCURRENCY
+              value: "48"
+            - name: CRYO_CHUNK_SIZE
+              value: "10000"
+            - name: CRYO_RPS
+              value: "0"
+            - name: EXTRACT_DATASETS
+              value: "blocks,transactions,logs"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: HOME
+              value: "/tmp"
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "4", memory: 4Gi }
+          volumeMounts:
+            - name: etl-temp
+              mountPath: /tmp/cryo-extract
+      volumes:
+        - name: etl-temp
+          emptyDir:
+            sizeLimit: 10Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-backfill-3
+  namespace: ethereum
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: etl-backfill
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: etl-sa
+      restartPolicy: OnFailure
+      tolerations:
+        - key: ethereum-node
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: workload-type
+                    operator: In
+                    values: ["ethereum"]
+      containers:
+        - name: etl
+          image: ${ACR_LOGIN_SERVER}/etl:latest
+          imagePullPolicy: Always
+          env:
+            - name: ERIGON_RPC_URL
+              value: "http://erigon:8545"
+            - name: CH_URL
+              value: "http://clickhouse-ethereum-analytics:8123/?database=ethereum"
+            - name: CH_USER
+              value: "etherwurst"
+            - name: CH_PASSWORD
+              value: "etherwurst-ch-2026"
+            - name: WORKER_ID
+              value: "backfill-3"
+            - name: START_BLOCK
+              value: "19650000"
+            - name: END_BLOCK
+              value: "24650000"
+            - name: BATCH_SIZE
+              value: "10000"
+            - name: MAX_BLOCKS
+              value: "25000000"
+            - name: CRYO_CONCURRENCY
+              value: "48"
+            - name: CRYO_CHUNK_SIZE
+              value: "10000"
+            - name: CRYO_RPS
+              value: "0"
+            - name: EXTRACT_DATASETS
+              value: "blocks,transactions,logs"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: HOME
+              value: "/tmp"
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "4", memory: 4Gi }
+          volumeMounts:
+            - name: etl-temp
+              mountPath: /tmp/cryo-extract
+      volumes:
+        - name: etl-temp
+          emptyDir:
+            sizeLimit: 10Gi

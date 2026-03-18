@@ -5,13 +5,15 @@ Erigon → cryo (Rust) → Parquet → ClickHouse
 
 Architecture:
   Processes blocks in small batches (default 500). Each batch:
-    1. cryo extracts one dataset → Parquet files on disk
-    2. HTTP POST sends each file to ClickHouse
+    1. cryo extracts datasets → Parquet files on disk
+    2. Concurrent HTTP POSTs send files to ClickHouse (async insert)
     3. Cleanup Parquet files
     4. Save progress
 
   This bounds memory usage regardless of total block range and provides
   incremental progress — a crash only loses the current batch.
+
+  Supports parallel workers via WORKER_ID + START_BLOCK/END_BLOCK.
 
 Environment:
   ERIGON_RPC_URL          Erigon JSON-RPC endpoint
@@ -30,6 +32,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests as req
 
@@ -136,6 +139,8 @@ def ingest_to_clickhouse(parquet_file, ch_table):
                 "query": f"INSERT INTO {ch_table} FORMAT Parquet",
                 "user": CH_USER,
                 "password": CH_PASSWORD,
+                "async_insert": "1",
+                "wait_for_async_insert": "0",
             },
             data=f,
             headers={"Content-Type": "application/octet-stream"},
@@ -204,7 +209,8 @@ def process_batch(batch_start, batch_end):
     ]
     run(cmd, timeout=3600)
 
-    # Ingest each dataset's parquet files into the corresponding table
+    # Ingest each dataset's parquet files into the corresponding table (concurrent)
+    ingest_tasks = []  # (file_path, ch_table, dataset_name)
     for dataset in dataset_names:
         ch_table = CH_TABLES[dataset]
 
@@ -218,10 +224,23 @@ def process_batch(batch_start, batch_end):
             continue
 
         for f in parquet_files:
-            ingest_to_clickhouse(f, ch_table)
-            files_ingested += 1
+            ingest_tasks.append((f, ch_table, dataset))
 
-        print(f"    {ch_table}: {len(parquet_files)} files ingested → CH")
+    # Upload all Parquet files in parallel (up to 4 threads)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(ingest_to_clickhouse, f, tbl): (f, tbl, ds)
+            for f, tbl, ds in ingest_tasks
+        }
+        dataset_counts = {}
+        for future in as_completed(futures):
+            f, tbl, ds = futures[future]
+            future.result()  # propagate exceptions
+            files_ingested += 1
+            dataset_counts[tbl] = dataset_counts.get(tbl, 0) + 1
+
+    for tbl, count in dataset_counts.items():
+        print(f"    {tbl}: {count} files ingested → CH")
 
     cleanup()
     return files_ingested

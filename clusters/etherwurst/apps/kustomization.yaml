@@ -16,3 +16,4 @@ resources:
   - goldilocks.yaml
   - opencost.yaml
   - spot-dashboard.yaml
+  - etl-backfill.yaml

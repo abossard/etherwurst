@@ -105,7 +105,7 @@ spec:
           - name: BATCH_SIZE
             value: "10000"
           - name: CRYO_CONCURRENCY
-            value: "16"
+            value: "48"
           - name: CRYO_CHUNK_SIZE
             value: "10000"
           - name: CRYO_RPS
