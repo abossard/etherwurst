@@ -18,7 +18,7 @@ metadata:
   name: pv-erigon-premiumv2
 spec:
   capacity:
-    storage: 2Ti
+    storage: 3Ti
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
@@ -47,6 +47,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Ti
+      storage: 3Ti
   storageClassName: managed-csi-premiumv2
   volumeName: pv-erigon-premiumv2
