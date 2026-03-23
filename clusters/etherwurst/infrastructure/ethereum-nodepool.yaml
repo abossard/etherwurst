@@ -39,7 +39,7 @@ spec:
           values: ["spot"]
         - key: karpenter.azure.com/sku-family
           operator: In
-          values: ["D", "E", "F"]  # General-purpose, memory-optimized, compute-optimized
+          values: ["D", "E", "F", "L", "M"]  # General-purpose, memory-optimized, compute-optimized, storage-optimized
         - key: karpenter.azure.com/sku-cpu
           operator: In
           values: ["4", "8", "16"]
