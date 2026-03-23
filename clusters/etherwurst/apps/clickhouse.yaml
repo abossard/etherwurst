@@ -71,4 +71,4 @@ spec:
           storageClassName: premium-ssd-retain
           resources:
             requests:
-              storage: 500Gi
+              storage: 1Ti
